@@ -1,0 +1,57 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>AIfootball</AssemblyName>
+    <RootNamespace>AIfootball.App</RootNamespace>
+    <Version>2.0.0</Version>
+    <Authors>AIfootball Team</Authors>
+    <Description>AI 足球轨迹分析平台</Description>
+    <ApplicationIcon>..\..\assets\icons\AIfootball.ico</ApplicationIcon>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <SelfContained>false</SelfContained>
+    <!-- 只保留中文本地化资源，避免打包 es/fr/de 等卫星程序集目录 -->
+    <SatelliteResourceLanguages>zh-Hans</SatelliteResourceLanguages>
+
+    <!-- MSIX 打包 (可选, 需 Windows 10 SDK) -->
+    <!-- 发布 MSIX: dotnet publish -c Release -p:EnableMsixTooling=true -->
+    <EnableMsixTooling Condition="'$(EnableMsixTooling)' == ''">false</EnableMsixTooling>
+    <WindowsPackageType>Msix</WindowsPackageType>
+    <ApplicationTitle>AIfootball</ApplicationTitle>
+    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+    <GenerateAppInstallerFile>false</GenerateAppInstallerFile>
+    <PublisherDisplayName>AIfootball</PublisherDisplayName>
+  </PropertyGroup>
+
+  <!-- MSIX 清单 -->
+  <ItemGroup Condition="'$(EnableMsixTooling)' == 'true'">
+    <AppxManifest Include="Package.appxmanifest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.122" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Resources\**" />
+  </ItemGroup>
+
+  <!-- 嵌入 Python 引擎到输出目录 -->
+  <ItemGroup>
+    <Content Include="..\AIfootball.Engine\aifootball\**\*"
+             Link="python_engine\aifootball\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\AIfootball.Engine\requirements.txt"
+             Link="python_engine\requirements.txt"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

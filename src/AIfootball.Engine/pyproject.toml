@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aifootball"
+version = "2.0.0"
+description = "足球轨迹分析引擎 — 3D重建 · 弹道拟合 · 智能分析"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "opencv-python>=4.8",
+    "scipy>=1.10",
+    "ultralytics>=8.0",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+cuda = ["torch>=2.0"]
+cpu = ["torch>=2.0"]
+
+[project.scripts]
+aifootball = "aifootball.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+    <AssemblyName>AIfootball</AssemblyName>
+    <RootNamespace>AIfootball.App</RootNamespace>
+    <Version>2.0.0.0</Version>
+    <Authors>AIfootball Team</Authors>
+    <Description>AI Football Trajectory Analysis Platform</Description>
+    <PublisherDisplayName>AIfootball</PublisherDisplayName>
+    <SelfContained>false</SelfContained>
+
+    <!-- MSIX 打包 -->
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>Msix</WindowsPackageType>
+    <ApplicationTitle>AIfootball</ApplicationTitle>
+    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+    <AppxPackageSigningTimestampDigestAlgorithm>SHA256</AppxPackageSigningTimestampDigestAlgorithm>
+    <GenerateAppInstallerFile>true</GenerateAppInstallerFile>
+    <AppInstallerUri>https://aifootball.example.com/installers/</AppInstallerUri>
+    <AppInstallerCheckForUpdateFrequency>OnApplicationRun</AppInstallerCheckForUpdateFrequency>
+    <DaysUntilAppInstallerUpdate>7</DaysUntilAppInstallerUpdate>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.122" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="Assets\**\*" />
+    <Content Include="Assets\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- 包含 Python 引擎源码到输出 -->
+  <ItemGroup>
+    <Content Include="..\AIfootball.Engine\aifootball\**\*">
+      <Link>python\aifootball\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\AIfootball.Engine\requirements.txt">
+      <Link>python\requirements.txt</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- 包含运行时数据（不参与编译但打包进 MSIX） -->
+  <ItemGroup>
+    <Content Include="..\..\calib\**\*" Condition="Exists('..\..\calib')">
+      <Link>calib\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\data\goalkeepers\**\*" Condition="Exists('..\..\data\goalkeepers')">
+      <Link>data\goalkeepers\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\..\models\**\*" Condition="Exists('..\..\models')">
+      <Link>models\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

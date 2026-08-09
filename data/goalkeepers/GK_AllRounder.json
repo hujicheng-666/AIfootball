@@ -1,0 +1,31 @@
+{
+    "DisplayName":  "All-Round Keeper",
+    "Description":  "Balanced profile with strong center coverage and no extreme blind spot.",
+    "Height":  1.91,
+    "DiveSpeed":  4.1,
+    "JumpDistance":  1.18,
+    "JumpHeight":  0.58,
+    "Reach":  0.64,
+    "TendGoalSpeed":  3.2,
+    "TendGoalDistance":  2.25,
+    "GoalKeeping":  0.8,
+    "SidePreference":  0,
+    "HeightPreference":  0,
+    "ProbabilityMap":  {
+                           "LowLeft":  0.68,
+                           "LowMidLeft":  0.75,
+                           "LowCenter":  0.84,
+                           "LowMidRight":  0.75,
+                           "LowRight":  0.68,
+                           "MidLeft":  0.64,
+                           "MidMidLeft":  0.72,
+                           "MidCenter":  0.82,
+                           "MidMidRight":  0.72,
+                           "MidRight":  0.64,
+                           "HighLeft":  0.5,
+                           "HighMidLeft":  0.58,
+                           "HighCenter":  0.68,
+                           "HighMidRight":  0.58,
+                           "HighRight":  0.5
+                       }
+}

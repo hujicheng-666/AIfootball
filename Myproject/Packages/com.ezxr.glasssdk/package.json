@@ -1,0 +1,6 @@
+{
+  "name": "com.ezxr.glasssdk",
+  "version": "1.0.0",
+  "displayName": "EZXR Glass SDK (Stub)",
+  "description": "Stub package to prevent compilation errors on Windows"
+}

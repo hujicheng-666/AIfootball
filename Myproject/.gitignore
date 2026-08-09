@@ -1,0 +1,38 @@
+﻿# Unity generated directories
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# Visual Studio
+/.vs/
+*.suo
+*.user
+*.userprefs
+*.opendb
+*.VC.db
+*.tmp
+*.pdb
+
+# Unity-generated VS project files
+/Assembly-CSharp.csproj
+/Assembly-CSharp-Editor.csproj
+/My project (1).sln
+
+# Build products
+*.apk
+*.aab
+*.unitypackage
+
+# Crash and log files
+*.log
+mono_crash.*
+sysinfo.txt
+
+# Local generated files
+/UpgradeLog.htm

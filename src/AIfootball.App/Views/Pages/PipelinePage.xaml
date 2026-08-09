@@ -1,0 +1,329 @@
+<UserControl x:Class="AIfootball.App.Views.Pages.PipelinePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:AIfootball.App.Converters"
+             xmlns:models="clr-namespace:AIfootball.App.Models"
+             Background="{StaticResource BackgroundBrush}">
+
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis"/>
+        <converters:InverseBoolConverter x:Key="InverseBool"/>
+        <converters:StepStatusToColorConverter x:Key="StepColor"/>
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <Grid Margin="32,24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*" MinHeight="420"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.25*"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="0.75*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 页面标题 -->
+            <TextBlock Grid.Row="0" Grid.ColumnSpan="3" Text="流水线处理"
+                       FontSize="26" FontWeight="Bold"
+                       Foreground="{StaticResource TextPrimaryBrush}"
+                       Margin="0,0,0,4"/>
+            <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="离线样本重建 / 在线实时采集"
+                       FontSize="14"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       Margin="0,0,0,24"/>
+
+            <!-- Tab 切换 -->
+            <Grid Grid.Row="2" Grid.ColumnSpan="3" Margin="0,0,0,16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <RadioButton x:Name="TabOffline"
+                             Content="📁  离线处理"
+                             GroupName="PipelineTab"
+                             IsChecked="True"
+                             Style="{StaticResource NavRadioButton}"
+                             Checked="TabOffline_Checked"
+                             Margin="0,0,8,0"/>
+                <RadioButton x:Name="TabOnline"
+                             Grid.Column="1"
+                             Content="🎥  在线录制"
+                             GroupName="PipelineTab"
+                             Style="{StaticResource NavRadioButton}"
+                             Checked="TabOnline_Checked"/>
+            </Grid>
+
+            <!-- ============== 离线模式面板 ============== -->
+            <Border x:Name="OfflinePanel" Grid.Row="3" Grid.Column="0" Style="{StaticResource Card}" Margin="0">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="选择要处理的样本" FontSize="14" FontWeight="SemiBold"/>
+                        <TextBlock Text=" (可多选，不选则处理全部)" FontSize="11"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   VerticalAlignment="Center" Margin="6,0,0,0"/>
+                    </StackPanel>
+
+                    <!-- 样本选择：简单 ItemsControl + CheckBox -->
+                    <ScrollViewer MaxHeight="160" Margin="0,0,0,12">
+                        <ItemsControl ItemsSource="{Binding SampleItems}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox IsChecked="{Binding IsSelected}"
+                                              Content="{Binding Name}"
+                                              Margin="4,2"
+                                              FontSize="13"
+                                              Foreground="{StaticResource TextPrimaryBrush}"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <!-- 选项 -->
+                    <WrapPanel Margin="0,0,0,12">
+                        <CheckBox Content="跳过3D重建"
+                                  IsChecked="{Binding SkipReconstruct}"
+                                  Margin="0,0,16,0"
+                                  FontSize="13"/>
+                        <CheckBox Content="跳过弹道拟合"
+                                  IsChecked="{Binding SkipBallistic}"
+                                  Margin="0,0,16,0"
+                                  FontSize="13"/>
+                    </WrapPanel>
+
+                    <!-- 门将选择 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="门将方案:" FontSize="13" VerticalAlignment="Center"/>
+                        <ComboBox ItemsSource="{Binding Goalkeepers}"
+                                  SelectedItem="{Binding SelectedGoalkeeper}"
+                                  DisplayMemberPath="Name"
+                                  MinWidth="160"
+                                  Margin="8,0,0,0"
+                                  VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- 执行按钮 -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Content="🚀 开始离线处理"
+                                Style="{StaticResource PrimaryButton}"
+                                Command="{Binding RunOfflineCommand}"
+                                Width="180"/>
+                        <Button Grid.Column="2" Content="⏹ 取消"
+                                Style="{StaticResource DangerButton}"
+                                Command="{Binding CancelCommand}"
+                                Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}"
+                                Width="96"
+                                Padding="12,8" MinHeight="40"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- ============== 在线模式面板 ============== -->
+            <Border x:Name="OnlinePanel" Grid.Row="3" Grid.Column="0" Style="{StaticResource Card}" Margin="0"
+                    Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock Text="实时双摄采集" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+                    <!-- 采集方式 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="采集方式:" FontSize="13" VerticalAlignment="Center"/>
+                        <RadioButton Content="🔌 USB/有线相机"
+                                     GroupName="CaptureMode"
+                                     IsChecked="{Binding IsUsbMode}"
+                                     FontSize="13"
+                                     Margin="10,0,0,0"
+                                     VerticalAlignment="Center"/>
+                        <RadioButton Content="📱 手机/网络相机"
+                                     GroupName="CaptureMode"
+                                     IsChecked="{Binding IsNetworkMode}"
+                                     FontSize="13"
+                                     Margin="10,0,0,0"
+                                     VerticalAlignment="Center"/>
+                    </StackPanel>
+
+                    <!-- USB 相机模式 -->
+                    <StackPanel Visibility="{Binding IsUsbMode, Converter={StaticResource BoolToVis}}">
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- 左摄像头 -->
+                            <TextBlock Text="左摄像头ID:" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox Grid.Column="1" Text="{Binding CamLeft}"
+                                     Style="{StaticResource ModernTextBox}" Width="80"/>
+
+                            <!-- 右摄像头 -->
+                            <TextBlock Grid.Column="2" Text="右摄像头ID:" FontSize="13" VerticalAlignment="Center" Margin="16,0,8,0"/>
+                            <TextBox Grid.Column="3" Text="{Binding CamRight}"
+                                     Style="{StaticResource ModernTextBox}" Width="80"/>
+                        </Grid>
+
+                        <!-- 摄像头检测 -->
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <Button Content="🔍 检测摄像头"
+                                    Style="{StaticResource SecondaryButton}"
+                                    Command="{Binding DetectCamerasCommand}"
+                                    Padding="12,6" FontSize="12"/>
+                            <TextBlock Text="{Binding CamerasText}"
+                                       FontSize="12"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center"
+                                       Margin="12,0,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- 手机/网络相机模式 -->
+                    <StackPanel Visibility="{Binding IsNetworkMode, Converter={StaticResource BoolToVis}}">
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- 左路视频流 -->
+                            <TextBlock Text="左路视频流:" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox Grid.Column="1" Text="{Binding UrlLeft}"
+                                     Style="{StaticResource ModernTextBox}"
+                                     Margin="0"/>
+
+                            <!-- 右路视频流 -->
+                            <TextBlock Grid.Column="2" Text="右路视频流:" FontSize="13" VerticalAlignment="Center" Margin="16,0,8,0"/>
+                            <TextBox Grid.Column="3" Text="{Binding UrlRight}"
+                                     Style="{StaticResource ModernTextBox}"
+                                     Margin="0"/>
+
+                            <!-- 测试连接 -->
+                            <StackPanel Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="🔗 测试连接(左路)"
+                                        Style="{StaticResource SecondaryButton}"
+                                        Command="{Binding TestNetworkCommand}"
+                                        Padding="12,6" FontSize="12"/>
+                                <TextBlock Text="{Binding NetworkTestText}"
+                                           FontSize="12"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="Wrap"
+                                           MaxWidth="240"
+                                           Margin="12,0,0,0"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="6" Padding="8,6" Margin="0,8,0,12">
+                            <TextBlock TextWrapping="Wrap" FontSize="11"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       Text="用法：两台手机安装推流 App（如 Android 的 IP Webcam / RTSP Camera），连接路由器 WiFi，开启推流后在手机上看 IP 与端口。将两个推流地址分别填入左/右路，点「测试连接」确认可达后即可录制。标定请使用同一台手机拍摄棋盘格素材。"/>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- 采样名称 -->
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="采样名称:" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox Grid.Column="1" Text="{Binding SampleName}"
+                                 Style="{StaticResource ModernTextBox}" Width="200"
+                                 HorizontalAlignment="Left"/>
+                    </Grid>
+
+                    <!-- 边录制边分析 -->
+                    <CheckBox Content="⚡ 边录制边分析（实时检测叠加，停止后立即出结果，不重跑检测）"
+                              IsChecked="{Binding IsLiveAnalysis}"
+                              FontSize="13"
+                              Margin="0,0,0,12"/>
+
+                    <!-- 执行 -->
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0" Content="🎬 开始录制+处理"
+                                Style="{StaticResource SuccessButton}"
+                                Command="{Binding RunOnlineCommand}"
+                                Width="180"/>
+                        <Button Grid.Column="2" Content="⏹ 停止"
+                                Style="{StaticResource DangerButton}"
+                                Command="{Binding CancelCommand}"
+                                Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}"
+                                Width="96"
+                                Padding="12,8" MinHeight="40"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- ===== 处理步骤进度 ===== -->
+            <Border Grid.Row="3" Grid.Column="2" Style="{StaticResource Card}">
+                <StackPanel>
+                    <TextBlock Text="📌 处理步骤" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12"/>
+
+                    <ProgressBar Height="7" Value="{Binding ProcessingProgress}" Maximum="100"
+                                 Foreground="{StaticResource PrimaryBrush}" BorderThickness="0" Margin="0,0,0,5"/>
+                    <TextBlock Text="{Binding ProcessingProgressText}" FontSize="10"
+                               Foreground="{StaticResource TextMutedBrush}" TextWrapping="Wrap" Margin="0,0,0,8"/>
+
+                    <ItemsControl ItemsSource="{Binding Steps}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type models:PipelineStep}">
+                                <Border Padding="8,6"
+                                        Background="{StaticResource SurfaceAltBrush}"
+                                        CornerRadius="6"
+                                        Margin="0,2">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <!-- 状态图标 -->
+                                        <TextBlock Text="{Binding StatusIcon}"
+                                                   Foreground="{Binding Status, Converter={StaticResource StepColor}}"
+                                                   FontSize="16"
+                                                   FontWeight="Bold"
+                                                   VerticalAlignment="Center"
+                                                   Width="28"/>
+                                        <!-- 步骤名 -->
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12"/>
+                                            <TextBlock Text="{Binding Description}"
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       FontSize="12" Margin="8,0,0,0"/>
+                                        </StackPanel>
+                                        <!-- 状态文字 -->
+                                        <TextBlock Grid.Column="2"
+                                                   Text="{Binding Status}"
+                                                   FontSize="11"
+                                                   Foreground="{StaticResource TextMutedBrush}"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </ScrollViewer>
+</UserControl>

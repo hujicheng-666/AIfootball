@@ -1,0 +1,199 @@
+{
+  "image_path": "D:\\Users\\32272\\Desktop\\IMG_20260314_222628.jpg",
+  "view_type": "shooter_right",
+  "output_prefix": "right",
+  "intrinsics_profile": "intrinsics_right",
+  "intrinsics_path": "D:\\AIfootball\\calib\\intrinsics_right.npz",
+  "intrinsics_image_size": [
+    2448,
+    1080
+  ],
+  "working_image_size": [
+    3264,
+    1440
+  ],
+  "solver_name": "EPNP direct",
+  "rvec": [
+    0.623671547485598,
+    -2.0357628903841936,
+    1.76275494938575
+  ],
+  "tvec": [
+    2.6411090210091053,
+    -1.0605126029125649,
+    18.182411253002403
+  ],
+  "rotation_matrix": [
+    [
+      -0.8313828104448264,
+      -0.5556652161911888,
+      0.006228162815904881
+    ],
+    [
+      -0.08562746624062462,
+      0.11702526343853303,
+      -0.9894306568640134
+    ],
+    [
+      0.5490633474582625,
+      -0.8231289420451342,
+      -0.1448729969510738
+    ]
+  ],
+  "camera_center_world": [
+    -7.878331953962197,
+    16.558148120392662,
+    1.5683874717096438
+  ],
+  "camera_matrix": [
+    [
+      2783.4612694489215,
+      0.0,
+      1521.1821422744908
+    ],
+    [
+      0.0,
+      2795.139871502033,
+      694.9961761108234
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "dist_coeffs": [
+    0.4520321330032874,
+    -6.935401535221218,
+    -0.004902693069989573,
+    -0.017094052116721613,
+    32.729921559607355
+  ],
+  "mean_reprojection_error": 16.610043394347418,
+  "max_reprojection_error": 28.637055599744738,
+  "inliers": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "swapped_left_right": false,
+  "points": [
+    {
+      "name": "left_post_bottom",
+      "label": "left post base (射门视角)",
+      "world": [
+        3.66,
+        0.0,
+        0.0
+      ],
+      "image": [
+        1441.0,
+        502.0
+      ],
+      "projected": [
+        1465.370605918492,
+        504.08374432838883
+      ],
+      "error": 24.45952622722949,
+      "is_inlier": true
+    },
+    {
+      "name": "right_post_bottom",
+      "label": "right post base (射门视角)",
+      "world": [
+        -3.66,
+        0.0,
+        0.0
+      ],
+      "image": [
+        2514.0,
+        567.0
+      ],
+      "projected": [
+        2494.109286579197,
+        564.0644473563239
+      ],
+      "error": 20.106166957237406,
+      "is_inlier": true
+    },
+    {
+      "name": "left_post_top",
+      "label": "left post top (射门视角)",
+      "world": [
+        3.66,
+        0.0,
+        2.44
+      ],
+      "image": [
+        1438.0,
+        144.0
+      ],
+      "projected": [
+        1464.5740496190867,
+        154.67243366178434
+      ],
+      "error": 28.637055599744738,
+      "is_inlier": true
+    },
+    {
+      "name": "right_post_top",
+      "label": "right post top (射门视角)",
+      "world": [
+        -3.66,
+        0.0,
+        2.44
+      ],
+      "image": [
+        2545.0,
+        128.0
+      ],
+      "projected": [
+        2542.5693194536193,
+        119.23145952245704
+      ],
+      "error": 9.099203812689483,
+      "is_inlier": true
+    },
+    {
+      "name": "penalty_spot",
+      "label": "penalty spot",
+      "world": [
+        0.0,
+        11.0,
+        0.0
+      ],
+      "image": [
+        421.0,
+        762.0
+      ],
+      "projected": [
+        421.49435171023924,
+        764.6938995545279
+      ],
+      "error": 2.738882696155865,
+      "is_inlier": true
+    },
+    {
+      "name": "left_goal_area_corner",
+      "label": "left goal-area corner (射门视角)",
+      "world": [
+        9.16,
+        5.5,
+        0.0
+      ],
+      "image": [
+        242.0,
+        502.0
+      ],
+      "projected": [
+        227.60467247842848,
+        499.4500715671706
+      ],
+      "error": 14.619425073027536,
+      "is_inlier": true
+    }
+  ]
+}

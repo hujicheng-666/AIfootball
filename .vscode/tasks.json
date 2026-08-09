@@ -1,0 +1,20 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "probe-cmd",
+			"type": "shell",
+			"command": "echo task-ok > d:\\AIfootball\\probe2.txt"
+		},
+		{
+			"label": "find-iscc",
+			"type": "shell",
+			"command": "d:\\AIfootball\\python_env\\python.exe d:\\AIfootball\\find_iscc.py > d:\\AIfootball\\find_result.txt 2>&1"
+		},
+		{
+			"label": "show-find",
+			"type": "shell",
+			"command": "d:\\AIfootball\\python_env\\python.exe -c \"print(open(r'd:\\AIfootball\\find_result.txt',encoding='utf-16').read())\""
+		}
+	]
+}

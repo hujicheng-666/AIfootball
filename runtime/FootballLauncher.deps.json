@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "FootballLauncher/1.0.0": {
+        "runtime": {
+          "FootballLauncher.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "FootballLauncher/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 rescap">
+
+  <Identity
+    Name="AIfootball.AIFootball"
+    Publisher="CN=AIfootball"
+    Version="2.0.0.0" />
+
+  <Properties>
+    <DisplayName>AIfootball</DisplayName>
+    <PublisherDisplayName>AIfootball</PublisherDisplayName>
+    <Description>AI 足球轨迹分析平台 — 双摄像头3D重建与弹道拟合</Description>
+    <Logo>Assets\Square150x150Logo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal"
+                        MinVersion="10.0.19041.0"
+                        MaxVersionTested="10.0.22621.0" />
+    <TargetDeviceFamily Name="Windows.Desktop"
+                        MinVersion="10.0.19041.0"
+                        MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="zh-CN" />
+    <Resource Language="en-US" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App"
+                 Executable="AIfootball.exe"
+                 EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="AIfootball"
+        Description="AI 足球轨迹分析平台"
+        BackgroundColor="#2563EB"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" />
+      </uap:VisualElements>
+
+      <Extensions>
+        <!-- 文件关联：.csv 轨迹文件 -->
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="aifootball-csv">
+            <uap:SupportedFileTypes>
+              <uap:FileType>.aifootball</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <Capability Name="internetClient" />
+    <DeviceCapability Name="webcam" />
+  </Capabilities>
+
+</Package>

@@ -1,0 +1,7 @@
+{
+  "sample": "sample1",
+  "launch_speed_mps": 15.92,
+  "launch_angle_deg": 18.3,
+  "peak_height_m": 1.18,
+  "num_observations": 80
+}

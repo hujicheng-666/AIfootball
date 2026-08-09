@@ -1,0 +1,55 @@
+{
+    "Entries": [
+        {
+            "Id": "30a9d0ca22c1416eb5ec211eba0c4c6c",
+            "DisplayName": "sample2_trajectory.csv",
+            "ImportedAt": "2026-08-08 16:10:39",
+            "FileName": "30a9d0ca22c1416eb5ec211eba0c4c6c.csv",
+            "LastResult": "被扑出",
+            "LastPlayedAt": "2026-08-08 16:10:45",
+            "LastTouchedByKeeper": true,
+            "LastEventTime": 0.5799999833106995
+        },
+        {
+            "Id": "df161a0755f94abea0dbf3a09d443f98",
+            "DisplayName": "sample2_trajectory.csv",
+            "ImportedAt": "2026-08-08 15:59:07",
+            "FileName": "df161a0755f94abea0dbf3a09d443f98.csv",
+            "LastResult": "射偏",
+            "LastPlayedAt": "2026-08-08 15:59:12",
+            "LastTouchedByKeeper": false,
+            "LastEventTime": 1.3250000476837159
+        },
+        {
+            "Id": "59a09d955db342c9a924bac7f132f814",
+            "DisplayName": "sample3_trajectory.csv",
+            "ImportedAt": "2026-08-08 15:58:48",
+            "FileName": "59a09d955db342c9a924bac7f132f814.csv",
+            "LastResult": "进球",
+            "LastPlayedAt": "2026-08-08 15:58:50",
+            "LastTouchedByKeeper": false,
+            "LastEventTime": 0.7713630199432373
+        },
+        {
+            "Id": "ac8cae7917ce4efeac70f2edc75c961b",
+            "DisplayName": "sample1_trajectory.csv",
+            "ImportedAt": "2026-08-08 15:58:39",
+            "FileName": "ac8cae7917ce4efeac70f2edc75c961b.csv",
+            "LastResult": "进球",
+            "LastPlayedAt": "2026-08-08 15:58:42",
+            "LastTouchedByKeeper": false,
+            "LastEventTime": 1.0753810405731202
+        },
+        {
+            "Id": "e8ae0261cca540fc959454faea8f5f3b",
+            "DisplayName": "sample2_trajectory.csv",
+            "ImportedAt": "2026-08-08 15:58:05",
+            "FileName": "e8ae0261cca540fc959454faea8f5f3b.csv",
+            "LastResult": "射偏",
+            "LastPlayedAt": "2026-08-08 15:58:32",
+            "LastTouchedByKeeper": false,
+            "LastEventTime": 1.3250000476837159
+        }
+    ],
+    "TotalUploads": 5
+}
