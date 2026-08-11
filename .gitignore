@@ -35,3 +35,4 @@ Desktop.ini
 
 # --- Local Python virtual environment (kept on developer machines only) ---
 python_env/
+logs/

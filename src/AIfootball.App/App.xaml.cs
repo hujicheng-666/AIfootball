@@ -18,6 +18,7 @@ public partial class App : Application
 
         // 确定应用根目录
         string baseDir = ResolveBaseDirectory();
+        AppLogger.Initialize(baseDir);
 
         // 构建 DI 容器
         var services = new ServiceCollection();

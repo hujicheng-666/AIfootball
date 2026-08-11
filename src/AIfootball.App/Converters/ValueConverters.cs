@@ -61,3 +61,31 @@ public class StepStatusToColorConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
         => Binding.DoNothing;
 }
+
+public class FileSelectionTextConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var path = value as string;
+        return string.IsNullOrWhiteSpace(path)
+            ? "未选择文件"
+            : $"已选择 · {System.IO.Path.GetFileName(path)}";
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => Binding.DoNothing;
+}
+
+public class FileSelectionBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        var selected = value is string path && !string.IsNullOrWhiteSpace(path);
+        var key = selected ? "AccentBrush" : "TextMutedBrush";
+        return Application.Current.TryFindResource(key) as Brush
+               ?? new SolidColorBrush(selected ? Colors.Green : Colors.Gray);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => Binding.DoNothing;
+}
