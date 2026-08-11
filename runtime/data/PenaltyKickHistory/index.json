@@ -1,6 +1,86 @@
 {
     "Entries": [
         {
+            "Id": "89bb5b470f924ff6a1b3cabab084d6c1",
+            "DisplayName": "sample2_trajectory.csv",
+            "ImportedAt": "2026-08-09 16:52:46",
+            "FileName": "89bb5b470f924ff6a1b3cabab084d6c1.csv",
+            "LastResult": "进球",
+            "LastPlayedAt": "2026-08-09 16:53:01",
+            "LastTouchedByKeeper": false,
+            "LastEventTime": 0.7199998497962952
+        },
+        {
+            "Id": "c1d49b7a30e54b309512b40e80042006",
+            "DisplayName": "sample2_trajectory.csv",
+            "ImportedAt": "2026-08-09 16:43:23",
+            "FileName": "c1d49b7a30e54b309512b40e80042006.csv",
+            "LastResult": "被扑出",
+            "LastPlayedAt": "2026-08-09 16:45:43",
+            "LastTouchedByKeeper": true,
+            "LastEventTime": 0.5000000596046448
+        },
+        {
+            "Id": "365ac79db212483c853c0f7f0c3f06ea",
+            "DisplayName": "sample2_trajectory.csv",
+            "ImportedAt": "2026-08-09 16:29:08",
+            "FileName": "365ac79db212483c853c0f7f0c3f06ea.csv",
+            "LastResult": "进球",
+            "LastPlayedAt": "2026-08-09 16:29:32",
+            "LastTouchedByKeeper": false,
+            "LastEventTime": 0.7399998307228088
+        },
+        {
+            "Id": "b23b04860d19481b9f0f2cafb5569c00",
+            "DisplayName": "sample2_trajectory.csv",
+            "ImportedAt": "2026-08-09 16:01:02",
+            "FileName": "b23b04860d19481b9f0f2cafb5569c00.csv",
+            "LastResult": "被扑出",
+            "LastPlayedAt": "2026-08-09 16:01:09",
+            "LastTouchedByKeeper": true,
+            "LastEventTime": 0.5600000023841858
+        },
+        {
+            "Id": "d47012a4f1c044ebb11b6d2455206367",
+            "DisplayName": "sample1_trajectory.csv",
+            "ImportedAt": "2026-08-09 16:00:40",
+            "FileName": "d47012a4f1c044ebb11b6d2455206367.csv",
+            "LastResult": "被扑出",
+            "LastPlayedAt": "2026-08-09 16:00:49",
+            "LastTouchedByKeeper": true,
+            "LastEventTime": 0.8399997353553772
+        },
+        {
+            "Id": "058c10f92e7e4bc0a1cec5e6db4e4bcc",
+            "DisplayName": "sample1_trajectory.csv",
+            "ImportedAt": "2026-08-09 15:52:45",
+            "FileName": "058c10f92e7e4bc0a1cec5e6db4e4bcc.csv",
+            "LastResult": "进球",
+            "LastPlayedAt": "2026-08-09 15:53:04",
+            "LastTouchedByKeeper": false,
+            "LastEventTime": 1.0753810405731202
+        },
+        {
+            "Id": "3ed1b6eace1341a685ed66b27f8268fa",
+            "DisplayName": "sample1_trajectory.csv",
+            "ImportedAt": "2026-08-09 15:48:18",
+            "FileName": "3ed1b6eace1341a685ed66b27f8268fa.csv",
+            "LastResult": "进球",
+            "LastPlayedAt": "2026-08-09 15:48:35",
+            "LastTouchedByKeeper": false,
+            "LastEventTime": 1.0753810405731202
+        },
+        {
+            "Id": "ccd1bb2717094c228988c3e26f163eef",
+            "DisplayName": "sample1_trajectory.csv",
+            "ImportedAt": "2026-08-09 15:43:36",
+            "FileName": "ccd1bb2717094c228988c3e26f163eef.csv",
+            "LastResult": "进球",
+            "LastPlayedAt": "2026-08-09 15:44:00",
+            "LastTouchedByKeeper": false,
+            "LastEventTime": 1.0753810405731202
+        },
+        {
             "Id": "30a9d0ca22c1416eb5ec211eba0c4c6c",
             "DisplayName": "sample2_trajectory.csv",
             "ImportedAt": "2026-08-08 16:10:39",
@@ -51,5 +131,5 @@
             "LastEventTime": 1.3250000476837159
         }
     ],
-    "TotalUploads": 5
+    "TotalUploads": 13
 }

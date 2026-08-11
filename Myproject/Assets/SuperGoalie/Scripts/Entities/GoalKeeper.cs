@@ -12,6 +12,12 @@ namespace Assets.SuperGoalie.Scripts.Entities
     [RequireComponent(typeof(RPGMovement))]
     public class GoalKeeper : MonoBehaviour
     {
+        public enum KeeperContactKind
+        {
+            Hand,
+            Arm,
+            Body
+        }
         /// <summary>
         /// A reference to the dive speed of this instance
         /// </summary>
@@ -58,6 +64,12 @@ namespace Assets.SuperGoalie.Scripts.Entities
         /// </summary>
         [SerializeField]
         float _tendGoalSpeed = 3f;
+
+        [Header("Dive animation timing (seconds)")]
+        [SerializeField] float _lowDiveReactionTime = 0.10f;
+        [SerializeField] float _midDiveReactionTime = 0.14f;
+        [SerializeField] float _highDiveReactionTime = 0.20f;
+        [SerializeField] float _centralBlockReactionTime = 0.08f;
 
         /// <summary>
         /// A reference to this instance's animator
@@ -107,6 +119,14 @@ namespace Assets.SuperGoalie.Scripts.Entities
         /// 本次扑救的预期成功率 (0-1)
         /// </summary>
         public float SaveProbability { get; set; }
+
+        /// <summary>The body region responsible for the latest trajectory contact.</summary>
+        public KeeperContactKind LastContactKind { get; private set; }
+
+        public bool HasDebugInterceptPlan { get; private set; }
+        public Vector3 DebugInterceptPoint { get; private set; }
+        public float DebugInterceptTime { get; private set; }
+        public float DebugReactionDelay { get; private set; }
 
         public delegate void BallLaunched(float flightPower, float velocity, Vector3 initial, Vector3 target);
         public BallLaunched OnBallLaunched;
@@ -239,10 +259,11 @@ namespace Assets.SuperGoalie.Scripts.Entities
                 FSM.ChangeState<TendGoalMainState>();
         }
 
-        public void RegisterBallContact()
+        public void RegisterBallContact(KeeperContactKind contactKind = KeeperContactKind.Body)
         {
             WasHitByBall = true;
             SaveAttemptSuccess = true;
+            LastContactKind = contactKind;
             if (FSM != null && FSM.ContainsState<PunchBallMainState>())
                 FSM.ChangeState<PunchBallMainState>();
         }
@@ -506,18 +527,75 @@ namespace Assets.SuperGoalie.Scripts.Entities
                 dataPosition.x = -dataPosition.x;
                 SaveProbability = _goalkeeperData.GetSaveProbability(dataPosition, goalWidth, goalHeight);
 
-                // 应用偏好修正
                 float nx = Mathf.InverseLerp(-goalWidth * 0.5f, goalWidth * 0.5f, dataPosition.x);
                 float ny = Mathf.InverseLerp(0f, goalHeight, ballPositionAtGoal.y);
                 SaveProbability += _goalkeeperData.SidePreference * (nx - 0.5f) * 0.1f;
                 SaveProbability += _goalkeeperData.HeightPreference * (ny - 0.5f) * 0.1f;
-                // Probability maps describe zone performance; GoalKeeping calibrates
-                // the overall level without turning the map into a binary threshold.
                 SaveProbability *= Mathf.Lerp(0.82f, 1.06f, Mathf.Clamp01(GoalKeeping));
                 SaveProbability = Mathf.Clamp01(SaveProbability);
             }
-
             return UnityEngine.Random.value <= SaveProbability;
+        }
+
+        public void SetDebugInterceptPlan(Vector3 point, float timeToIntercept, float reactionDelay, bool reachable)
+        {
+            DebugInterceptPoint = point;
+            DebugInterceptTime = timeToIntercept;
+            DebugReactionDelay = reactionDelay;
+            HasDebugInterceptPlan = reachable;
+        }
+
+        void OnDrawGizmosSelected()
+        {
+            if (!HasDebugInterceptPlan)
+                return;
+            Gizmos.color = Color.cyan;
+            Gizmos.DrawLine(transform.position + Vector3.up * 1.0f, DebugInterceptPoint);
+            Gizmos.DrawWireSphere(DebugInterceptPoint, 0.14f);
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireSphere(transform.position + Vector3.up * Height * 0.55f, Reach + JumpDistance);
+        }
+
+        /// <summary>
+        /// Deterministic shot difficulty score.  It informs animation/planning; the
+        /// swept animated contact remains the only authority for an actual save.
+        /// </summary>
+        public float EvaluateSaveQuality(Vector3 ballPositionAtGoal, float ballSpeed, float timeToContact, bool reachable)
+        {
+            float baseProbability = 0.85f;
+            if (_goalkeeperData != null)
+            {
+                float goalWidth = _goal != null ? _goal.GoalWidth : 7.32f;
+                float goalHeight = _goal != null ? _goal.GoalHeight : 2.44f;
+                Vector3 dataPosition = ballPositionAtGoal;
+                dataPosition.x = -dataPosition.x;
+                baseProbability = _goalkeeperData.GetSaveProbability(dataPosition, goalWidth, goalHeight);
+                float nx = Mathf.InverseLerp(-goalWidth * 0.5f, goalWidth * 0.5f, dataPosition.x);
+                float ny = Mathf.InverseLerp(0f, goalHeight, ballPositionAtGoal.y);
+                baseProbability += _goalkeeperData.SidePreference * (nx - 0.5f) * 0.1f;
+                baseProbability += _goalkeeperData.HeightPreference * (ny - 0.5f) * 0.1f;
+            }
+
+            float speedFactor = Mathf.Lerp(1f, 0.58f, Mathf.InverseLerp(8f, 30f, ballSpeed));
+            float timeFactor = Mathf.Lerp(0.48f, 1f, Mathf.InverseLerp(0.10f, 0.75f, timeToContact));
+            float keepingFactor = Mathf.Lerp(0.82f, 1.06f, Mathf.Clamp01(GoalKeeping));
+            SaveProbability = Mathf.Clamp01(baseProbability * speedFactor * timeFactor * keepingFactor * (reachable ? 1f : 0.25f));
+            return SaveProbability;
+        }
+
+        /// <summary>Author these values from the actual dive clips' first usable hand pose.</summary>
+        public float GetDiveReactionTime(float normalizedHeight, float normalizedLateralOffset)
+        {
+            float authored;
+            if (Mathf.Abs(normalizedLateralOffset) < 0.13f)
+                authored = _centralBlockReactionTime;
+            else if (normalizedHeight < 0.30f)
+                authored = _lowDiveReactionTime;
+            else if (normalizedHeight > 0.68f)
+                authored = _highDiveReactionTime;
+            else
+                authored = _midDiveReactionTime;
+            return Mathf.Lerp(authored, authored * 0.65f, Mathf.Clamp01(GoalKeeping));
         }
 
         /// <summary>
@@ -530,10 +608,12 @@ namespace Assets.SuperGoalie.Scripts.Entities
             Vector3 endCenter,
             float ballRadius,
             out Vector3 contactCenter,
-            out Vector3 contactNormal)
+            out Vector3 contactNormal,
+            out KeeperContactKind contactKind)
         {
             contactCenter = endCenter;
             contactNormal = Vector3.zero;
+            contactKind = KeeperContactKind.Body;
             if (_animator == null || !_animator.isHuman)
                 return false;
 
@@ -564,6 +644,7 @@ namespace Assets.SuperGoalie.Scripts.Entities
                     found = true;
                     earliest = hitFraction;
                     contactNormal = normal;
+                    contactKind = GetContactKind(capsule);
                 }
             }
 
@@ -574,6 +655,17 @@ namespace Assets.SuperGoalie.Scripts.Entities
             if (contactNormal.sqrMagnitude < 0.000001f)
                 contactNormal = (startCenter - endCenter).normalized;
             return true;
+        }
+
+        static KeeperContactKind GetContactKind(BoneCapsule capsule)
+        {
+            if (capsule.Start == HumanBodyBones.LeftHand || capsule.Start == HumanBodyBones.RightHand
+                || capsule.End == HumanBodyBones.LeftHand || capsule.End == HumanBodyBones.RightHand)
+                return KeeperContactKind.Hand;
+            if (capsule.Start == HumanBodyBones.LeftUpperArm || capsule.Start == HumanBodyBones.LeftLowerArm
+                || capsule.Start == HumanBodyBones.RightUpperArm || capsule.Start == HumanBodyBones.RightLowerArm)
+                return KeeperContactKind.Arm;
+            return KeeperContactKind.Body;
         }
 
         public bool UsesAnimatedContactRig

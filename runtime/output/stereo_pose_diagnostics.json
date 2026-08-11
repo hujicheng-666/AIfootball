@@ -1,0 +1,15 @@
+{
+  "left_camera_center_world": [
+    7.676050730540201,
+    16.373657811236374,
+    1.46433082102001
+  ],
+  "right_camera_center_world": [
+    -7.900564556166154,
+    16.577350846669322,
+    1.5868399620462759
+  ],
+  "baseline_m": 15.578428776111311,
+  "relative_rotation_deg": 69.5470989035571,
+  "note": "Diagnostic only. No unverified baseline or mounting prior was imposed during calibration."
+}

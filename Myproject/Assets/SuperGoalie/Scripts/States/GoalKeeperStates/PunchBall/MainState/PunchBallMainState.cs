@@ -32,7 +32,7 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
             {
                     var gm = Managers.GameManager.Instance;
                     if (gm != null)
-                        gm.ShowStatus(string.Format("\u6251\u6551\u6210\u529F! (\u6982\u7387 {0:0}%)", Owner.SaveProbability * 100f));
+                        gm.ShowStatus(string.Format("{0}! (\u8d28\u91cf {1:0}%)", GetContactLabel(Owner.LastContactKind), Owner.SaveProbability * 100f));
                 }
 
             Owner.Animator.SetTrigger("Exit");
@@ -163,6 +163,19 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
                 ? position + pitchForward * (minDistance - distanceIntoPitch)
                 : position;
         }
+        string GetContactLabel(GoalKeeper.KeeperContactKind kind)
+        {
+            switch (kind)
+            {
+                case GoalKeeper.KeeperContactKind.Hand:
+                    return "\u624b\u638c\u6251\u51fa";
+                case GoalKeeper.KeeperContactKind.Arm:
+                    return "\u624b\u81c2\u6321\u51fa";
+                default:
+                    return "\u8eab\u4f53\u5c01\u6321";
+            }
+        }
+
         GoalKeeper Owner
         {
             get
