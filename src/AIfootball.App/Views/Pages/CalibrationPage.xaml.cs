@@ -82,7 +82,7 @@ public partial class CalibrationPage : UserControl
                 LeftChessVideo.Text.Trim(), RightChessVideo.Text.Trim());
             IntrinsicsStatus.Text = ok
                 ? "✅ 内参标定完成，结果已保存到 calib/，可继续外参标定"
-                : "❌ 内参标定失败，请查看下方日志";
+                : "内参标定失败，请查看 logs 文件夹中的日志";
         }
         catch (Exception ex)
         {
@@ -114,7 +114,7 @@ public partial class CalibrationPage : UserControl
                 LeftFieldImage.Text.Trim(), RightFieldImage.Text.Trim());
             ExtrinsicsStatus.Text = ok
                 ? "✅ 外参标定完成，结果已保存到 calib/，可以开始处理样本了"
-                : "❌ 外参标定失败，请查看下方日志";
+                : "外参标定失败，请查看 logs 文件夹中的日志";
         }
         catch (Exception ex)
         {

@@ -4,7 +4,7 @@
              Background="{StaticResource BackgroundBrush}">
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <Grid Margin="32,24">
+        <Grid Margin="26,22">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -29,7 +29,7 @@
             <!-- 输出目录 -->
             <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource Card}" Margin="0">
                 <StackPanel>
-                    <TextBlock Text="📂 输出目录结构" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                    <TextBlock Text="交付目录" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
 
                     <Border Background="{StaticResource SurfaceAltBrush}"
                             CornerRadius="8" Padding="16">
@@ -76,17 +76,17 @@
             <!-- 快速打开 -->
             <Border Grid.Row="2" Grid.Column="2" Style="{StaticResource Card}">
                 <StackPanel>
-                    <TextBlock Text="🔗 快速操作" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                    <TextBlock Text="操作" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
                     <WrapPanel>
-                        <Button Content="📁 打开输出目录"
+                        <Button Content="打开输出目录"
                                 Style="{StaticResource SecondaryButton}"
                                 Padding="16,8" Margin="0,0,12,8"
                                 Click="OpenOutputDir_Click"/>
-                        <Button Content="🎮 启动 Unity 查看器"
+                        <Button Content="启动 Unity 查看器"
                                 Style="{StaticResource SuccessButton}"
                                 Padding="16,8" Margin="0,0,12,8"
                                 Click="LaunchUnity_Click"/>
-                        <Button Content="📊 导出 CSV"
+                        <Button Content="导出 CSV"
                                 Style="{StaticResource SecondaryButton}"
                                 Padding="16,8" Margin="0,0,12,8"
                                 Click="ExportCsv_Click"/>

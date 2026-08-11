@@ -285,25 +285,48 @@ public class PipelineViewModel : ViewModelBase
 
         IsRunning = true;
         _cts = new CancellationTokenSource();
+        InitSteps(new List<string> { SampleName });
+        ProcessingProgress = 0;
+        ProcessingProgressText = "等待采集任务启动";
 
         _mainVm.AddLog("info", $"======== 在线录制: {SampleName} ========");
 
         var progress = new Progress<(string Message, string Level)>(p =>
         {
             _mainVm.AddLog(p.Level, p.Message);
+            UpdateProcessingProgress(p.Message);
+            UpdateStepStatusFromLog(p.Message);
         });
+        try
+        {
+            var success = IsLiveAnalysis
+                ? await _pipelineService.RunOnlineLiveAsync(
+                    camLeft, camRight, SampleName, progress, _cts.Token)
+                : await _pipelineService.RunOnlineAsync(
+                    camLeft, camRight, SampleName, progress, _cts.Token);
 
-        var success = IsLiveAnalysis
-            ? await _pipelineService.RunOnlineLiveAsync(
-                camLeft, camRight, SampleName, progress, _cts.Token)
-            : await _pipelineService.RunOnlineAsync(
-                camLeft, camRight, SampleName, progress, _cts.Token);
-
-        IsRunning = false;
-        _mainVm.AddLog(success ? "success" : "error",
-            success ? "======== 录制+处理完成 ========" : "======== 失败 ========");
-
-        _mainVm.RefreshLists();
+            CompleteRemainingSteps(success);
+            if (success)
+            {
+                ProcessingProgress = 100;
+                ProcessingProgressText = "录制与处理完成";
+            }
+            _mainVm.AddLog(success ? "success" : "error",
+                success ? "录制与处理完成" : "录制或处理失败");
+            _mainVm.RefreshLists();
+        }
+        catch (Exception ex)
+        {
+            CompleteRemainingSteps(false);
+            ProcessingProgressText = "任务异常，详情已写入日志文件";
+            _mainVm.AddLog("error", "在线任务异常: " + ex.Message);
+        }
+        finally
+        {
+            IsRunning = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
     }
 
     private async Task DetectCamerasAsync()

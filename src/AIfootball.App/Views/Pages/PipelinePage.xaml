@@ -12,7 +12,7 @@
     </UserControl.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <Grid Margin="32,24">
+        <Grid Margin="26,22">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -44,7 +44,7 @@
                 </Grid.ColumnDefinitions>
 
                 <RadioButton x:Name="TabOffline"
-                             Content="📁  离线处理"
+                             Content="离线处理"
                              GroupName="PipelineTab"
                              IsChecked="True"
                              Style="{StaticResource NavRadioButton}"
@@ -52,7 +52,7 @@
                              Margin="0,0,8,0"/>
                 <RadioButton x:Name="TabOnline"
                              Grid.Column="1"
-                             Content="🎥  在线录制"
+                             Content="在线录制"
                              GroupName="PipelineTab"
                              Style="{StaticResource NavRadioButton}"
                              Checked="TabOnline_Checked"/>
@@ -114,11 +114,11 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Content="🚀 开始离线处理"
+                        <Button Grid.Column="0" Content="开始离线处理"
                                 Style="{StaticResource PrimaryButton}"
                                 Command="{Binding RunOfflineCommand}"
                                 Width="180"/>
-                        <Button Grid.Column="2" Content="⏹ 取消"
+                        <Button Grid.Column="2" Content="取消"
                                 Style="{StaticResource DangerButton}"
                                 Command="{Binding CancelCommand}"
                                 Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}"
@@ -137,13 +137,13 @@
                     <!-- 采集方式 -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                         <TextBlock Text="采集方式:" FontSize="13" VerticalAlignment="Center"/>
-                        <RadioButton Content="🔌 USB/有线相机"
+                        <RadioButton Content="USB / 有线相机"
                                      GroupName="CaptureMode"
                                      IsChecked="{Binding IsUsbMode}"
                                      FontSize="13"
                                      Margin="10,0,0,0"
                                      VerticalAlignment="Center"/>
-                        <RadioButton Content="📱 手机/网络相机"
+                        <RadioButton Content="手机 / 网络相机"
                                      GroupName="CaptureMode"
                                      IsChecked="{Binding IsNetworkMode}"
                                      FontSize="13"
@@ -174,7 +174,7 @@
 
                         <!-- 摄像头检测 -->
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                            <Button Content="🔍 检测摄像头"
+                            <Button Content="检测摄像头"
                                     Style="{StaticResource SecondaryButton}"
                                     Command="{Binding DetectCamerasCommand}"
                                     Padding="12,6" FontSize="12"/>
@@ -214,7 +214,7 @@
 
                             <!-- 测试连接 -->
                             <StackPanel Grid.Row="1" Grid.ColumnSpan="4" Orientation="Horizontal" Margin="0,8,0,0">
-                                <Button Content="🔗 测试连接(左路)"
+                                <Button Content="测试左路连接"
                                         Style="{StaticResource SecondaryButton}"
                                         Command="{Binding TestNetworkCommand}"
                                         Padding="12,6" FontSize="12"/>
@@ -248,7 +248,7 @@
                     </Grid>
 
                     <!-- 边录制边分析 -->
-                    <CheckBox Content="⚡ 边录制边分析（实时检测叠加，停止后立即出结果，不重跑检测）"
+                    <CheckBox Content="边录制边分析（实时检测叠加，停止后立即出结果，不重跑检测）"
                               IsChecked="{Binding IsLiveAnalysis}"
                               FontSize="13"
                               Margin="0,0,0,12"/>
@@ -261,11 +261,11 @@
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Content="🎬 开始录制+处理"
+                        <Button Grid.Column="0" Content="开始录制与处理"
                                 Style="{StaticResource SuccessButton}"
                                 Command="{Binding RunOnlineCommand}"
                                 Width="180"/>
-                        <Button Grid.Column="2" Content="⏹ 停止"
+                        <Button Grid.Column="2" Content="停止"
                                 Style="{StaticResource DangerButton}"
                                 Command="{Binding CancelCommand}"
                                 Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}"
@@ -278,7 +278,7 @@
             <!-- ===== 处理步骤进度 ===== -->
             <Border Grid.Row="3" Grid.Column="2" Style="{StaticResource Card}">
                 <StackPanel>
-                    <TextBlock Text="📌 处理步骤" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                    <TextBlock Text="处理进度" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12"/>
 
                     <ProgressBar Height="7" Value="{Binding ProcessingProgress}" Maximum="100"
                                  Foreground="{StaticResource PrimaryBrush}" BorderThickness="0" Margin="0,0,0,5"/>

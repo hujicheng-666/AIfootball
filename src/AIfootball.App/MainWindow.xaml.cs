@@ -117,12 +117,12 @@ public partial class MainWindow : Window
         if (WindowState == WindowState.Maximized)
         {
             WindowState = WindowState.Normal;
-            MaxRestoreBtn.Content = "□";
+            MaxRestoreBtn.Content = "\uE922";
         }
         else
         {
             WindowState = WindowState.Maximized;
-            MaxRestoreBtn.Content = "❐";
+            MaxRestoreBtn.Content = "\uE923";
         }
     }
 

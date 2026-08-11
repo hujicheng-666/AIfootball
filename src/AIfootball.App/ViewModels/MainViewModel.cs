@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using AIfootball.App.Models;
+using AIfootball.App.Services;
 using AIfootball.App.Services.Interfaces;
 
 namespace AIfootball.App.ViewModels;
@@ -99,8 +100,27 @@ public class MainViewModel : ViewModelBase
     // ─── 门将 ───
     public ObservableCollection<GoalkeeperInfo> Goalkeepers { get; } = new();
 
-    // ─── 日志 ───
-    public ObservableCollection<LogEntry> LogEntries { get; } = new();
+    // ─── 标定进度（仅在标定页显示） ───
+    private bool _isCalibrationRunning;
+    public bool IsCalibrationRunning
+    {
+        get => _isCalibrationRunning;
+        set => SetProperty(ref _isCalibrationRunning, value);
+    }
+
+    private int _calibrationProgress;
+    public int CalibrationProgress
+    {
+        get => _calibrationProgress;
+        set => SetProperty(ref _calibrationProgress, value);
+    }
+
+    private string _calibrationProgressText = "等待标定任务";
+    public string CalibrationProgressText
+    {
+        get => _calibrationProgressText;
+        set => SetProperty(ref _calibrationProgressText, value);
+    }
 
     // ─── 命令 ───
     public RelayCommand RefreshCommand { get; }
@@ -240,11 +260,18 @@ public class MainViewModel : ViewModelBase
 
         var calibDir = Path.Combine(_pythonEngine.WorkspaceDir, "calib");
         AddLog("info", "======== 开始视频内参标定 ========");
-        var progress = new Progress<(string Message, string Level)>(p => AddLog(p.Level, p.Message));
-        var ok = await _pipelineService.CalibrateIntrinsicsAsync(leftVideo, rightVideo, calibDir, progress);
-        AddLog(ok ? "success" : "error", ok ? "✅ 内参标定完成" : "❌ 内参标定失败");
-        RefreshLists();
-        return ok;
+        BeginCalibration("正在准备内参标定");
+        try
+        {
+            var progress = new Progress<(string Message, string Level)>(p => ReportCalibration(p.Message, p.Level));
+            var ok = await _pipelineService.CalibrateIntrinsicsAsync(leftVideo, rightVideo, calibDir, progress);
+            CalibrationProgress = ok ? 100 : CalibrationProgress;
+            CalibrationProgressText = ok ? "内参标定完成" : "内参标定失败，详情已写入日志文件";
+            AddLog(ok ? "success" : "error", ok ? "内参标定完成" : "内参标定失败");
+            RefreshLists();
+            return ok;
+        }
+        finally { IsCalibrationRunning = false; }
     }
 
     /// <summary>外参标定：左右各一张足球场照片（交互点击参考点）</summary>
@@ -258,11 +285,18 @@ public class MainViewModel : ViewModelBase
 
         var calibDir = Path.Combine(_pythonEngine.WorkspaceDir, "calib");
         AddLog("info", "======== 开始外参标定（请在弹出的图像窗口点击参考点） ========");
-        var progress = new Progress<(string Message, string Level)>(p => AddLog(p.Level, p.Message));
-        var ok = await _pipelineService.CalibrateExtrinsicsAsync(leftImage, rightImage, calibDir, progress);
-        AddLog(ok ? "success" : "error", ok ? "✅ 外参标定完成" : "❌ 外参标定失败");
-        RefreshLists();
-        return ok;
+        BeginCalibration("正在准备外参标定");
+        try
+        {
+            var progress = new Progress<(string Message, string Level)>(p => ReportCalibration(p.Message, p.Level));
+            var ok = await _pipelineService.CalibrateExtrinsicsAsync(leftImage, rightImage, calibDir, progress);
+            CalibrationProgress = ok ? 100 : CalibrationProgress;
+            CalibrationProgressText = ok ? "外参标定完成" : "外参标定失败，详情已写入日志文件";
+            AddLog(ok ? "success" : "error", ok ? "外参标定完成" : "外参标定失败");
+            RefreshLists();
+            return ok;
+        }
+        finally { IsCalibrationRunning = false; }
     }
 
     private void OnRefresh()
@@ -301,7 +335,7 @@ public class MainViewModel : ViewModelBase
                 await SetReadyStateAsync();
             else
             {
-                EnvStatusText = "安装失败，查看下方日志了解详情";
+                EnvStatusText = "安装失败，详情已写入 logs 文件夹";
                 SetupProgressVisible = false;
                 IsSettingUp = false;
             }
@@ -319,11 +353,22 @@ public class MainViewModel : ViewModelBase
 
     public void AddLog(string level, string message)
     {
-        Application.Current.Dispatcher.Invoke(() =>
-        {
-            LogEntries.Add(new LogEntry(DateTime.Now, level, message));
-            if (LogEntries.Count > 1000)
-                LogEntries.RemoveAt(0);
-        });
+        AppLogger.Write(level, message);
+    }
+
+    private void BeginCalibration(string status)
+    {
+        IsCalibrationRunning = true;
+        CalibrationProgress = 0;
+        CalibrationProgressText = status;
+    }
+
+    private void ReportCalibration(string message, string level)
+    {
+        AddLog(level, message);
+        CalibrationProgressText = message.Trim();
+        var match = System.Text.RegularExpressions.Regex.Match(message, @"(\d{1,3})%");
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var percent))
+            CalibrationProgress = Math.Clamp(percent, 0, 99);
     }
 }

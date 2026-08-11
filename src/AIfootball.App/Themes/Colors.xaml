@@ -1,40 +1,33 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Neutral desktop-tool palette: the data gets attention, not the chrome. -->
+    <Color x:Key="PrimaryColor">#2F6FAD</Color>
+    <Color x:Key="PrimaryDarkColor">#255A8D</Color>
+    <Color x:Key="PrimaryLightColor">#E7F0F8</Color>
+    <Color x:Key="AccentColor">#23836B</Color>
+    <Color x:Key="WarningColor">#B57922</Color>
+    <Color x:Key="DangerColor">#B54A4A</Color>
 
-    <!-- ============== 品牌色 ============== -->
-    <Color x:Key="PrimaryColor">#2563EB</Color>
-    <Color x:Key="PrimaryDarkColor">#1D4ED8</Color>
-    <Color x:Key="PrimaryLightColor">#DBEAFE</Color>
-    <Color x:Key="AccentColor">#10B981</Color>
-    <Color x:Key="WarningColor">#F59E0B</Color>
-    <Color x:Key="DangerColor">#EF4444</Color>
-
-    <!-- ============== 表面色 ============== -->
     <Color x:Key="SurfaceColor">#FFFFFF</Color>
-    <Color x:Key="SurfaceAltColor">#F9FAFB</Color>
-    <Color x:Key="BackgroundColor">#F3F4F6</Color>
-    <Color x:Key="BorderColor">#E5E7EB</Color>
+    <Color x:Key="SurfaceAltColor">#F5F7F9</Color>
+    <Color x:Key="BackgroundColor">#EEF1F4</Color>
+    <Color x:Key="BorderColor">#D7DDE3</Color>
 
-    <!-- ============== 文字色 ============== -->
-    <Color x:Key="TextPrimaryColor">#111827</Color>
-    <Color x:Key="TextSecondaryColor">#6B7280</Color>
-    <Color x:Key="TextMutedColor">#9CA3AF</Color>
+    <Color x:Key="TextPrimaryColor">#1D2731</Color>
+    <Color x:Key="TextSecondaryColor">#5A6875</Color>
+    <Color x:Key="TextMutedColor">#7B8995</Color>
 
-    <!-- ============== 画刷 ============== -->
     <SolidColorBrush x:Key="PrimaryBrush" Color="{StaticResource PrimaryColor}"/>
     <SolidColorBrush x:Key="PrimaryDarkBrush" Color="{StaticResource PrimaryDarkColor}"/>
     <SolidColorBrush x:Key="PrimaryLightBrush" Color="{StaticResource PrimaryLightColor}"/>
     <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}"/>
     <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}"/>
-
     <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}"/>
     <SolidColorBrush x:Key="SurfaceAltBrush" Color="{StaticResource SurfaceAltColor}"/>
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BackgroundColor}"/>
     <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}"/>
-
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
     <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
-
 </ResourceDictionary>

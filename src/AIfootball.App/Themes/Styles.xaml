@@ -7,7 +7,7 @@
 
     <!-- ============== 全局样式 ============== -->
     <Style TargetType="Window">
-        <Setter Property="FontFamily" Value="Segoe UI, Microsoft YaHei, sans-serif"/>
+        <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI, sans-serif"/>
         <Setter Property="FontSize" Value="14"/>
         <Setter Property="Background" Value="{StaticResource BackgroundBrush}"/>
         <Setter Property="TextElement.Foreground" Value="{StaticResource TextPrimaryBrush}"/>
@@ -20,15 +20,15 @@
         <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Padding" Value="24,10"/>
-        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="Padding" Value="18,9"/>
+        <Setter Property="FontSize" Value="13"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border Background="{TemplateBinding Background}"
-                            CornerRadius="8"
+                            CornerRadius="7"
                             Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
@@ -45,46 +45,25 @@
         </Setter>
     </Style>
 
+    <!-- 默认业务按钮：文件浏览等未显式设置样式的按钮也保持一致。 -->
+    <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+
     <!-- 次级按钮 -->
-    <Style x:Key="SecondaryButton" TargetType="Button">
-        <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
-        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
-        <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="16,8"/>
-        <Setter Property="FontSize" Value="13"/>
-        <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Border Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="8"
-                            Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Opacity" Value="0.5"/>
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
+    <Style x:Key="SecondaryButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+        <Setter Property="Padding" Value="14,8"/>
     </Style>
 
     <!-- 成功按钮 -->
     <Style x:Key="SuccessButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
-        <Setter Property="Background" Value="{StaticResource AccentBrush}"/>
+        <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
     </Style>
 
     <!-- 危险按钮 -->
     <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
-        <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
+        <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
     </Style>
 
     <!-- 图标按钮 -->
@@ -116,8 +95,8 @@
         <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
         <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="12"/>
-        <Setter Property="Padding" Value="20"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Padding" Value="22"/>
     </Style>
 
     <!-- ============== 输入框样式 ============== -->
@@ -134,7 +113,7 @@
                             Background="{TemplateBinding Background}"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
-                            CornerRadius="8">
+                            CornerRadius="7">
                         <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}"/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -272,10 +251,10 @@
     <Style x:Key="NavRadioButton" TargetType="RadioButton">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
-        <Setter Property="Padding" Value="14,11"/>
+        <Setter Property="Padding" Value="12,10"/>
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
-        <Setter Property="BorderThickness" Value="3,0,0,0"/>
+        <Setter Property="BorderThickness" Value="2,0,0,0"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -311,11 +290,12 @@
     <!-- ============== 标题栏按钮样式 ============== -->
     <Style x:Key="TitleBarButton" TargetType="Button">
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="Foreground" Value="#F3F6F8"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Width" Value="44"/>
-        <Setter Property="Height" Value="32"/>
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="Width" Value="46"/>
+        <Setter Property="Height" Value="48"/>
+        <Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+        <Setter Property="FontSize" Value="10"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
@@ -325,7 +305,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+                            <Setter Property="Background" Value="#52616C"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -335,10 +315,10 @@
 
     <Style x:Key="TitleBarCloseButton" TargetType="Button"
            BasedOn="{StaticResource TitleBarButton}">
-        <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+        <Setter Property="Foreground" Value="#F3F6F8"/>
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
+                <Setter Property="Background" Value="#C42B1C"/>
                 <Setter Property="Foreground" Value="White"/>
             </Trigger>
         </Style.Triggers>
