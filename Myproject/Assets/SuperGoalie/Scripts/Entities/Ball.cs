@@ -212,10 +212,19 @@ namespace Assets.SuperGoalie.Scripts.Entities
 
         public bool TryDeflectFromKeeper(GoalKeeper keeper, Vector3 contactNormal)
         {
-            return TryDeflectFromKeeper(keeper, contactNormal, CenterPosition);
+            return TryDeflectFromKeeper(keeper, contactNormal, CenterPosition, GoalKeeper.KeeperContactKind.Body);
         }
 
         public bool TryDeflectFromKeeper(GoalKeeper keeper, Vector3 contactNormal, Vector3 ballCenter)
+        {
+            return TryDeflectFromKeeper(keeper, contactNormal, ballCenter, GoalKeeper.KeeperContactKind.Body);
+        }
+
+        public bool TryDeflectFromKeeper(
+            GoalKeeper keeper,
+            Vector3 contactNormal,
+            Vector3 ballCenter,
+            GoalKeeper.KeeperContactKind contactKind)
         {
             if (keeper == null)
                 return false;
@@ -228,23 +237,48 @@ namespace Assets.SuperGoalie.Scripts.Entities
             Vector3 incomingVelocity = Velocity;
             Vector3 pitchForward = goal != null ? goal.PitchForward : Vector3.zero;
             Vector3 releaseDirection;
+            float speedMultiplier;
+            float lift;
             if (pitchForward.sqrMagnitude > Mathf.Epsilon)
             {
                 Vector3 lateralNudge = Vector3.ProjectOnPlane(contactNormal, Vector3.up) * 0.25f;
-                releaseDirection = pitchForward + lateralNudge + Vector3.up * 0.2f;
+                if (contactKind == GoalKeeper.KeeperContactKind.Hand)
+                {
+                    // A hand contact is the most controlled: direct the ball away
+                    // from goal with enough lift to make a follow-up possible.
+                    releaseDirection = pitchForward + lateralNudge * 0.55f + Vector3.up * 0.34f;
+                    speedMultiplier = 0.60f;
+                    lift = 0.9f;
+                }
+                else if (contactKind == GoalKeeper.KeeperContactKind.Arm)
+                {
+                    releaseDirection = pitchForward + lateralNudge * 1.20f + Vector3.up * 0.20f;
+                    speedMultiplier = 0.46f;
+                    lift = 0.7f;
+                }
+                else
+                {
+                    // Torso/leg blocks are less controlled and retain more of the
+                    // incoming direction, which can produce rebounds near goal.
+                    releaseDirection = Vector3.Reflect(incomingVelocity, contactNormal) + pitchForward * 0.45f + Vector3.up * 0.12f;
+                    speedMultiplier = 0.34f;
+                    lift = 0.45f;
+                }
             }
             else
             {
                 Vector3 fallbackNormal = contactNormal.sqrMagnitude > Mathf.Epsilon ? contactNormal.normalized : -incomingVelocity.normalized;
                 releaseDirection = Vector3.Reflect(incomingVelocity, fallbackNormal);
+                speedMultiplier = contactKind == GoalKeeper.KeeperContactKind.Hand ? 0.60f : 0.42f;
+                lift = contactKind == GoalKeeper.KeeperContactKind.Hand ? 0.9f : 0.55f;
             }
 
             if (releaseDirection.sqrMagnitude < Mathf.Epsilon)
                 releaseDirection = keeper.transform.forward;
             releaseDirection.Normalize();
 
-            keeper.RegisterBallContact();
-            ReleaseTrajectoryToPhysics(releaseDirection * Mathf.Max(4.5f, incomingVelocity.magnitude * 0.55f) + Vector3.up * 0.6f);
+            keeper.RegisterBallContact(contactKind);
+            ReleaseTrajectoryToPhysics(releaseDirection * Mathf.Max(3.5f, incomingVelocity.magnitude * speedMultiplier) + Vector3.up * lift);
             return true;
         }
 

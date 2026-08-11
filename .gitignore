@@ -32,3 +32,6 @@ Myproject/Builds/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# --- Local Python virtual environment (kept on developer machines only) ---
+python_env/

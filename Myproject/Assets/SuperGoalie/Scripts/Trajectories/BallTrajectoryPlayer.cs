@@ -142,6 +142,7 @@ namespace Assets.SuperGoalie.Scripts.Trajectories
             Vector3 selectedCenter = endCenter;
             Vector3 selectedNormal = Vector3.zero;
             float selectedDistance = float.PositiveInfinity;
+            GoalKeeper.KeeperContactKind selectedContactKind = GoalKeeper.KeeperContactKind.Body;
 
             // The rendered humanoid bones are the contact authority. The prefab's
             // single upright capsule does not follow a diving animation and caused
@@ -156,7 +157,8 @@ namespace Assets.SuperGoalie.Scripts.Trajectories
 
                 Vector3 contactCenter;
                 Vector3 contactNormal;
-                if (keeper.TryGetAnimatedContact(startCenter, endCenter, radius, out contactCenter, out contactNormal))
+                GoalKeeper.KeeperContactKind contactKind;
+                if (keeper.TryGetAnimatedContact(startCenter, endCenter, radius, out contactCenter, out contactNormal, out contactKind))
                 {
                     float distance = Vector3.Distance(startCenter, contactCenter);
                     if (distance < selectedDistance)
@@ -165,6 +167,7 @@ namespace Assets.SuperGoalie.Scripts.Trajectories
                         selectedKeeper = keeper;
                         selectedCenter = contactCenter;
                         selectedNormal = contactNormal;
+                        selectedContactKind = contactKind;
                     }
                 }
             }
@@ -198,7 +201,7 @@ namespace Assets.SuperGoalie.Scripts.Trajectories
             _ball.Rigidbody.position = _ball.RootPositionForCenter(
                 selectedCenter + selectedNormal.normalized * 0.003f);
             return _ball.TryDeflectFromKeeper(
-                selectedKeeper, selectedNormal.normalized, selectedCenter);
+                selectedKeeper, selectedNormal.normalized, selectedCenter, selectedContactKind);
         }
 
         void PrepareKinematicBody()

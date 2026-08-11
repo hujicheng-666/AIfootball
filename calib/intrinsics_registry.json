@@ -8,7 +8,7 @@
         2448,
         1080
       ],
-      "mean_error": 0.2538039787890505
+      "mean_error": 0.25380398518042147
     },
     "right": {
       "intrinsics_path": "D:\\AIfootball\\calib\\intrinsics_right.npz",
