@@ -341,6 +341,13 @@ namespace Assets.SuperGoalie.Scripts.Entities
             get { return TrajectoryPlayer != null ? TrajectoryPlayer.Duration : 0f; }
         }
 
+        /// <summary>回放速度倍率（1 = 实时），转发给轨迹播放器</summary>
+        public float PlaybackSpeed
+        {
+            get { return TrajectoryPlayer != null ? TrajectoryPlayer.PlaybackSpeed : 1f; }
+            set { if (TrajectoryPlayer != null) TrajectoryPlayer.PlaybackSpeed = value; }
+        }
+
         void OnDestroy()
         {
             if (TrajectoryPlayer == null)

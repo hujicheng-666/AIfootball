@@ -164,13 +164,14 @@ public class PipelineService : IPipelineService
             .ToList();
     }
 
-    public void LaunchUnityViewer(List<string> sampleNames, string? goalkeeperName = null)
+    public Process? LaunchUnityViewer(List<string> sampleNames, string? goalkeeperName = null, bool embedded = false,
+        nint hostWindowHandle = 0)
     {
         var exe = FindUnityExe();
         if (exe == null)
         {
             Debug.WriteLine("[Unity] 未找到 Unity 可执行文件");
-            return;
+            return null;
         }
 
         var csvPath = Path.Combine(_engine.WorkspaceDir, "data",
@@ -178,7 +179,7 @@ public class PipelineService : IPipelineService
         if (!File.Exists(csvPath))
         {
             Debug.WriteLine($"[Unity] CSV 不存在: {csvPath}");
-            return;
+            return null;
         }
 
         // 同步 CSV 到 Unity exe 所在目录的 data/ 下（Unity 自动检测需要）
@@ -196,11 +197,24 @@ public class PipelineService : IPipelineService
         {
             FileName = exe,
             WorkingDirectory = Path.GetDirectoryName(exe),
-            UseShellExecute = true,
+            UseShellExecute = !embedded,
+            CreateNoWindow = embedded,
+            WindowStyle = ProcessWindowStyle.Normal,
         };
 
         // 传 --csv 绝对路径（Unity 支持直接加载）
-        var argList = new List<string> { "--csv", $"\"{csvPath}\"" };
+        var argList = new List<string>();
+        if (embedded)
+        {
+            // Let the Unity Windows Player create itself as a child window from startup.
+            // This preserves its native input routing and dynamic render resolution.
+            argList.AddRange(["-popupwindow", "-screen-fullscreen", "0", "--wpf-host"]);
+            var commandFile = Path.Combine(_engine.WorkspaceDir, "runtime", "data", "wpf-unity-command.txt");
+            argList.AddRange(["--wpf-command", $"\"{commandFile}\""]);
+            if (hostWindowHandle != 0)
+                argList.AddRange(["-parentHWND", hostWindowHandle.ToString(), "delayed"]);
+        }
+        argList.AddRange(["--csv", $"\"{csvPath}\""]);
 
         if (!string.IsNullOrEmpty(goalkeeperName))
         {
@@ -214,40 +228,37 @@ public class PipelineService : IPipelineService
 
         try
         {
-            Process.Start(startInfo);
+            return Process.Start(startInfo);
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"[Unity] 启动失败: {ex.Message}");
         }
+        return null;
     }
 
     private string? FindUnityExe()
     {
         var ws = _engine.WorkspaceDir;
         // 优先 FootballViewer.exe（根目录）
-        var preferred = Path.Combine(ws, "FootballViewer.exe");
-        if (File.Exists(preferred)) return preferred;
-
         // 搜索根目录下所有 Unity 构建的 exe
-        foreach (var exe in FindUnityExesInDir(ws))
-            return exe;
-
         // 当前主项目的 Unity 运行版位于 runtime/。这里优先于旧发布目录，
         // 确保桌面程序启动的是刚由 Unity Build 更新的查看器。
         // Packaged releases keep Unity separate from the self-contained .NET files.
         // Otherwise Unity Mono can load the WPF runtime assemblies and crash on startup.
-        var viewerDir = Path.Combine(ws, "viewer");
-        if (Directory.Exists(viewerDir))
-        {
-            foreach (var exe in FindUnityExesInDir(viewerDir))
-                return exe;
-        }
-
         var runtimeDir = Path.Combine(ws, "runtime");
         if (Directory.Exists(runtimeDir))
         {
             foreach (var exe in FindUnityExesInDir(runtimeDir))
+                return exe;
+        }
+
+        // 打包发布版把 Unity 查看器放在 viewer/（与自包含 .NET 文件分离，
+        // 避免 Unity Mono 误加载 WPF 运行时程序集导致启动崩溃）
+        var viewerDir = Path.Combine(ws, "viewer");
+        if (Directory.Exists(viewerDir))
+        {
+            foreach (var exe in FindUnityExesInDir(viewerDir))
                 return exe;
         }
 

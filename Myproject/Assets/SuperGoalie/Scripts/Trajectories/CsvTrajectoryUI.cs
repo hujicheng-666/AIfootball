@@ -67,6 +67,12 @@ namespace Assets.SuperGoalie.Scripts.Trajectories
                 _scoreText.text = "进球数：" + score;
         }
 
+        /// <summary>显示/隐藏整个控制界面（嵌入模式由 WPF 接管）</summary>
+        public void SetVisible(bool visible)
+        {
+            gameObject.SetActive(visible);
+        }
+
         public void SetPlaying(bool playing)
         {
             if (_selectButton != null) _selectButton.interactable = !playing;

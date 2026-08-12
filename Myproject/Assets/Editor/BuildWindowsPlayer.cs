@@ -100,9 +100,12 @@ public static class BuildWindowsPlayer
     {
         SceneCompatibilityRepair.RepairAndOpenDemo();
 
-        string projectRoot = Directory.GetParent(Application.dataPath).FullName;
-        string outputDirectory = Path.Combine(projectRoot, "Builds", "Windows");
-        string executablePath = Path.Combine(outputDirectory, "FootballPenaltyCsvPlatform.exe");
+        // 直接构建到 AIfootball 仓库的 runtime/（桌面程序与发布脚本均从
+        // runtime/Myproject.exe + Myproject_Data 加载），免去二次复制部署。
+        string projectRoot = Directory.GetParent(Application.dataPath).FullName;   // ...\Myproject
+        string repoRoot = Directory.GetParent(projectRoot).FullName;               // ...\AIfootball
+        string outputDirectory = Path.Combine(repoRoot, "runtime");
+        string executablePath = Path.Combine(outputDirectory, "Myproject.exe");
         Directory.CreateDirectory(outputDirectory);
 
         string[] scenes = EditorBuildSettings.scenes

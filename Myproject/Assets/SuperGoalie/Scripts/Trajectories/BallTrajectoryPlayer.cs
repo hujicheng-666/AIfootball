@@ -29,6 +29,9 @@ namespace Assets.SuperGoalie.Scripts.Trajectories
 
         public float Duration { get { return _trajectory != null ? _trajectory.Duration : 0f; } }
 
+        /// <summary>回放速度倍率（1 = 实时），由 WpfCommandBridge 的 speed: 命令控制</summary>
+        public float PlaybackSpeed { get; set; } = 1f;
+
         public Vector3 CurrentVelocity { get { return _playing ? _currentVelocity : Vector3.zero; } }
 
         public BallTrajectory ActiveTrajectory { get { return _trajectory; } }
@@ -116,7 +119,7 @@ namespace Assets.SuperGoalie.Scripts.Trajectories
             if (!_playing || _trajectory == null)
                 return;
 
-            _elapsedTime = Mathf.Min(_elapsedTime + Time.fixedDeltaTime, _trajectory.Duration);
+            _elapsedTime = Mathf.Min(_elapsedTime + Time.fixedDeltaTime * PlaybackSpeed, _trajectory.Duration);
             Vector3 previousCenter = _ball.CenterPosition;
             Vector3 center = _trajectory.EvaluateCenter(_elapsedTime);
             _currentVelocity = _trajectory.EvaluateVelocity(_elapsedTime);

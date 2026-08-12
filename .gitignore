@@ -36,3 +36,12 @@ Desktop.ini
 # --- Local Python virtual environment (kept on developer machines only) ---
 python_env/
 logs/
+# --- Runtime generated files (never commit) ---
+runtime/data/wpf-unity-command.txt
+runtime/data/wpf-bridge-debug.txt
+
+# --- Local git/debug helper snapshots ---
+_git*.txt
+_git*.log
+_proc.txt
+_ghcreate.txt

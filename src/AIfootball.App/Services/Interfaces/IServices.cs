@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using AIfootball.App.Models;
 
 namespace AIfootball.App.Services.Interfaces;
@@ -94,7 +95,8 @@ public interface IPipelineService
     Task<(bool Ok, string Message)> TestNetworkStreamAsync(string url, int timeoutSeconds = 8);
 
     /// <summary>启动 Unity 查看器</summary>
-    void LaunchUnityViewer(List<string> sampleNames, string? goalkeeperName = null);
+    Process? LaunchUnityViewer(List<string> sampleNames, string? goalkeeperName = null, bool embedded = false,
+        nint hostWindowHandle = 0);
 
     /// <summary>视频内参标定：左右各用一段棋盘格视频</summary>
     Task<bool> CalibrateIntrinsicsAsync(

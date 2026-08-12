@@ -1,5 +1,6 @@
 using Assets.SuperGoalie.Scripts.Data;
 using Assets.SuperGoalie.Scripts.Entities;
+using Assets.SuperGoalie.Scripts.Platform;
 using Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Idle.MainState;
 using Assets.SuperGoalie.Scripts.Trajectories;
 using Patterns.Singleton;
@@ -40,6 +41,8 @@ namespace Assets.SuperGoalie.Scripts.Managers
             get { return _goalKeeper != null ? _goalKeeper.GoalkeeperData : null; }
         }
 
+        public Goal Goal { get { return _goal; } }
+        public Ball Ball { get { return _ball; } }
         public bool HasLoadedTrajectory { get { return _loadedTrajectory != null; } }
         public float TrajectoryTime { get { return _ball != null ? _ball.TrajectoryTime : 0f; } }
         public float TrajectoryDuration
@@ -198,6 +201,9 @@ namespace Assets.SuperGoalie.Scripts.Managers
                         _trajectoryUi.SetStatus(loadMsg);
                 }
             }
+
+            // 嵌入模式（WPF --wpf-host）：接管 WPF 端控制命令
+            WpfCommandBridge.Create(this);
         }
 
         void ResolveSceneReferences()
@@ -323,6 +329,41 @@ namespace Assets.SuperGoalie.Scripts.Managers
                 Debug.Log($"[GameManager] 切换门将: {_currentGoalkeeperName}");
             }
             return ok;
+        }
+
+        /// <summary>切换到上一个可用门将</summary>
+        public bool PreviousGoalkeeper()
+        {
+            if (_availableGoalkeepers.Count == 0) return false;
+            int index = _availableGoalkeepers.IndexOf(_currentGoalkeeperName ?? "");
+            if (index < 0) index = 0;
+            index = (index - 1 + _availableGoalkeepers.Count) % _availableGoalkeepers.Count;
+            return SwitchGoalkeeper(_availableGoalkeepers[index]);
+        }
+
+        /// <summary>切换到下一个可用门将</summary>
+        public bool NextGoalkeeper()
+        {
+            if (_availableGoalkeepers.Count == 0) return false;
+            int index = _availableGoalkeepers.IndexOf(_currentGoalkeeperName ?? "");
+            if (index < 0) index = -1;
+            index = (index + 1) % _availableGoalkeepers.Count;
+            return SwitchGoalkeeper(_availableGoalkeepers[index]);
+        }
+
+        /// <summary>设置轨迹回放速度倍率</summary>
+        public void SetPlaybackSpeed(float speed)
+        {
+            if (_ball != null)
+                _ball.PlaybackSpeed = speed;
+            Debug.Log("[GameManager] 回放速度: " + speed);
+        }
+
+        /// <summary>嵌入模式隐藏/显示 Unity 自带 UI</summary>
+        public void SetUiVisible(bool visible)
+        {
+            if (_trajectoryUi != null)
+                _trajectoryUi.SetVisible(visible);
         }
 
         string FindDataSubDir(string subDir)
