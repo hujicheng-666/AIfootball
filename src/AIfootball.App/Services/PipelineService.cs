@@ -9,6 +9,10 @@ public class PipelineService : IPipelineService
 {
     private readonly IPythonEngine _engine;
 
+    private List<int>? _cachedCameras;
+    private DateTime _camerasCacheTime = DateTime.MinValue;
+    private static readonly TimeSpan CamerasCacheTtl = TimeSpan.FromSeconds(30);
+
     public PipelineService(IPythonEngine engine)
     {
         _engine = engine;
@@ -46,6 +50,23 @@ public class PipelineService : IPipelineService
             .Select(f => new GoalkeeperInfo(Path.GetFileNameWithoutExtension(f), f))
             .OrderBy(g => g.Name)
             .ToList();
+    }
+
+    public GoalkeeperStats? LoadGoalkeeperStats(string name)
+    {
+        var gkDir = Path.Combine(_engine.WorkspaceDir, "data", "goalkeepers");
+        var path = Path.Combine(gkDir, $"{name}.json");
+        if (!File.Exists(path)) return null;
+
+        try
+        {
+            string json = File.ReadAllText(path);
+            return System.Text.Json.JsonSerializer.Deserialize<GoalkeeperStats>(json);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public CalibrationStatus GetCalibrationStatus()
@@ -150,18 +171,25 @@ public class PipelineService : IPipelineService
 
     public async Task<List<int>> DetectCamerasAsync()
     {
+        // 短时间内复用缓存，避免每次点“检测摄像头”都启动一个 Python 子进程
+        if (_cachedCameras is not null && DateTime.UtcNow - _camerasCacheTime < CamerasCacheTtl)
+            return _cachedCameras;
+
         var (code, output, _) = await _engine.RunAsync(
             "-c",
             "\"from aifootball.capture.dual_camera import DualCameraRecorder; " +
             "print(','.join(str(c) for c in DualCameraRecorder.list_cameras()))\"");
 
-        if (code != 0 || string.IsNullOrWhiteSpace(output))
-            return new List<int>();
+        var cameras = (code != 0 || string.IsNullOrWhiteSpace(output))
+            ? new List<int>()
+            : output.Trim().Split(',')
+                .Select(s => int.TryParse(s.Trim(), out var c) ? c : -1)
+                .Where(c => c >= 0)
+                .ToList();
 
-        return output.Trim().Split(',')
-            .Select(s => int.TryParse(s.Trim(), out var c) ? c : -1)
-            .Where(c => c >= 0)
-            .ToList();
+        _cachedCameras = cameras;
+        _camerasCacheTime = DateTime.UtcNow;
+        return cameras;
     }
 
     public Process? LaunchUnityViewer(List<string> sampleNames, string? goalkeeperName = null, bool embedded = false,
@@ -190,7 +218,10 @@ public class PipelineService : IPipelineService
             var destCsv = Path.Combine(unityDataDir, $"{sampleNames[0]}_trajectory.csv");
             File.Copy(csvPath, destCsv, true);
         }
-        catch { /* 复制失败不影响启动 */ }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Unity] CSV 同步失败: {ex.Message}");
+        }
 
         // 构建命令行参数
         var startInfo = new ProcessStartInfo

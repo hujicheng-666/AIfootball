@@ -9,6 +9,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
 from scipy.interpolate import interp1d
 from ultralytics import YOLO
 
@@ -20,14 +21,18 @@ except Exception:
 
 
 from project.config import WORKSPACE as WORKSPACE_DIR, CALIB, SAMPLES
+from project.constants import (
+    SPORTS_BALL_CLASS_ID,
+    PENALTY_SPOT_WORLD,
+    FIELD_X_LIMITS,
+    FIELD_Y_LIMITS,
+    DEFAULT_IMGSZ,
+    DEFAULT_CONF,
+)
 
 OUTPUT_ROOT = WORKSPACE_DIR / "output" / "trajectory_3d"
 DEFAULT_YOLO_MODEL = "yolo11m.pt"
-YOLO_MODEL_PATH = Path(os.environ.get("YOLO_MODEL_PATH", WORKSPACE_DIR / DEFAULT_YOLO_MODEL))
-SPORTS_BALL_CLASS_ID = 32
-PENALTY_SPOT_WORLD = np.array([0.0, 11.0, 0.0], dtype=np.float64)
-FIELD_X_LIMITS = (-15.0, 15.0)
-FIELD_Y_LIMITS = (-5.0, 25.0)
+YOLO_MODEL_PATH = Path(os.environ.get("YOLO_MODEL_PATH", WORKSPACE_DIR / "models" / DEFAULT_YOLO_MODEL))
 WORLD_Z_LIMITS = (-1.0, 8.0)
 # 相机分配硬编码（射手视角定义：左相机=射门视角左侧、右相机=射门视角右侧）
 # 2026-08-08 修正：此前整表左右颠倒（旧守门员视角定义遗留），导致 VID_011..016
@@ -332,7 +337,7 @@ def _refine_ball_center(frame, x1, y1, x2, y2, orig_center):
         x1i, y1i = max(0, int(x1)), max(0, int(y1))
         x2i, y2i = min(frame.shape[1], int(x2)), min(frame.shape[0], int(y2))
         if x2i - x1i < 4 or y2i - y1i < 4:
-            return orig_center
+            return None
 
         roi = frame[y1i:y2i, x1i:x2i]
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
@@ -347,7 +352,7 @@ def _refine_ball_center(frame, x1, y1, x2, y2, orig_center):
         # Find contours in ball mask
         contours, _ = cv2.findContours(mask_ball, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
-            return orig_center
+            return None
 
         # Pick largest contour near bbox center
         bcx, bcy = (x1 + x2) / 2 - x1i, (y1 + y2) / 2 - y1i
@@ -372,9 +377,9 @@ def _refine_ball_center(frame, x1, y1, x2, y2, orig_center):
 
         if best_contour is not None:
             return np.array([best_contour[0] + x1i, best_contour[1] + y1i], dtype=np.float64)
-    except Exception:
-        pass
-    return orig_center
+    except Exception as exc:
+        print(f"[refine] 颜色分割细化失败: {exc}", file=sys.stderr)
+    return None
 
 
 def _csrt_bbox_to_detection(bbox_tuple, frame_w, frame_h):
@@ -543,7 +548,7 @@ def _adaptive_ball_detect(model, frame, expected_center, penalty_center, imgsz, 
     refined_center = _refine_ball_center(current_crop,
                                           bbox_crop[0], bbox_crop[1], bbox_crop[2], bbox_crop[3],
                                           chosen["center"])
-    if refined_center is not chosen["center"]:
+    if refined_center is not None:
         dx = refined_center[0] - chosen["center"][0]
         dy = refined_center[1] - chosen["center"][1]
         chosen["center"] = refined_center
@@ -575,12 +580,15 @@ def _sparse_scan_kick_frame(cap, fps, frame_count, penalty_center, model, config
     print(f"  起脚定位扫描：0/{frame_count} 帧 (0%)", flush=True)
 
     while True:
+        frame_idx += 1
+        if frame_idx % SPARSE_EVERY != 0:
+            # 跳过的帧只解复用（grab）不完整解码，避免稀疏扫描浪费解码时间
+            if not cap.grab():
+                break
+            continue
         ok, frame = cap.read()
         if not ok:
             break
-        frame_idx += 1
-        if frame_idx % SPARSE_EVERY != 0:
-            continue
 
         if frame_idx >= next_report_frame:
             elapsed = time.monotonic() - started_at
@@ -650,8 +658,10 @@ def detect_video_track(video_path, config, model, imgsz, conf):
     MAX_MISS = 5
     frame_idx = start_frame - 1
     started_at = time.monotonic()
+    last_report_time = 0.0
     next_report_frame = start_frame
-    # 提高进度报告频率（每秒约 5 次），使进度条连续平滑增长
+    # 提高进度报告频率（每秒约 5 次），使进度条连续平滑增长；同时用时间
+    # 节流，避免高帧率视频下 stdout 刷新过于频繁拖慢子进程通信。
     report_every = max(1, int(fps / 5))
     print(f"  密集跟踪：{start_frame}/{frame_count} 帧 (0%)", flush=True)
 
@@ -662,15 +672,18 @@ def detect_video_track(video_path, config, model, imgsz, conf):
         frame_idx += 1
 
         if frame_idx >= next_report_frame:
-            elapsed = time.monotonic() - started_at
-            completed = frame_idx - start_frame
-            total = max(frame_count - start_frame, 1)
-            percent = min(100, round(completed * 100 / total))
-            print(
-                f"  密集跟踪：{frame_idx}/{frame_count} 帧 ({percent}%)，"
-                f"已检测 {len(detections)} 帧，耗时 {elapsed:.0f}s",
-                flush=True,
-            )
+            now = time.monotonic()
+            if now - last_report_time >= 0.5:
+                elapsed = now - started_at
+                completed = frame_idx - start_frame
+                total = max(frame_count - start_frame, 1)
+                percent = min(100, round(completed * 100 / total))
+                print(
+                    f"  密集跟踪：{frame_idx}/{frame_count} 帧 ({percent}%)，"
+                    f"已检测 {len(detections)} 帧，耗时 {elapsed:.0f}s",
+                    flush=True,
+                )
+                last_report_time = now
             next_report_frame = frame_idx + report_every
 
         # --- predict next position with velocity+acceleration ---
@@ -686,9 +699,10 @@ def detect_video_track(video_path, config, model, imgsz, conf):
                                         velocity_mag=velocity_mag)
 
         # Fallback: full-frame YOLO if adaptive detection failed
+        # 兜底只做粗分辨率检测即可，避免全帧 1280 推理拖慢整体速度
         if chosen is None:
             result = model.predict(frame, classes=[SPORTS_BALL_CLASS_ID],
-                                   conf=conf, imgsz=imgsz, verbose=False)[0]
+                                   conf=conf, imgsz=min(imgsz, 640), verbose=False)[0]
             boxes = [] if result.boxes is None else list(result.boxes)
             chosen = pick_detection(boxes, expected_center, penalty_center)
 
@@ -823,9 +837,10 @@ def triangulate_ball_point(image_point_a, config_a, image_point_b, config_b):
     }
 
 
-def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_seconds):
-    interp_a = build_track_interpolators(track_a)
-    interp_b = build_track_interpolators(track_b)
+def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_seconds,
+                                  interp_a=None, interp_b=None):
+    interp_a = build_track_interpolators(track_a) if interp_a is None else interp_a
+    interp_b = build_track_interpolators(track_b) if interp_b is None else interp_b
     if interp_a is None or interp_b is None:
         return None
 
@@ -839,6 +854,16 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
     if len(times) == 0:
         return None
 
+    # 向量化插值：一次求出整条轨迹的左右 2D 点与置信度，避免逐点标量调用
+    points_a = np.column_stack([
+        interp_a["interp_x"](times), interp_a["interp_y"](times)]).astype(np.float64)
+    points_b = np.column_stack([
+        interp_b["interp_x"](times + offset_seconds),
+        interp_b["interp_y"](times + offset_seconds)]).astype(np.float64)
+    finite = np.all(np.isfinite(points_a), axis=1) & np.all(np.isfinite(points_b), axis=1)
+    conf_a = interp_a["interp_conf"](times)
+    conf_b = interp_b["interp_conf"](times + offset_seconds)
+
     tri_times = []
     world_points = []
     ray_gaps = []
@@ -846,28 +871,20 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
     image_points_left = []
     image_points_right = []
     conf_pairs = []
-    for t in times:
-        point_a = np.array([float(interp_a["interp_x"](t)), float(interp_a["interp_y"](t))], dtype=np.float64)
-        point_b = np.array(
-            [float(interp_b["interp_x"](t + offset_seconds)), float(interp_b["interp_y"](t + offset_seconds))],
-            dtype=np.float64,
-        )
-        if not (np.all(np.isfinite(point_a)) and np.all(np.isfinite(point_b))):
-            continue
-
+    for idx in np.where(finite)[0]:
+        point_a = points_a[idx]
+        point_b = points_b[idx]
         tri = triangulate_ball_point(point_a, config_a, point_b, config_b)
         if tri is None:
             continue
 
-        conf_a = float(interp_a["interp_conf"](t))
-        conf_b = float(interp_b["interp_conf"](t + offset_seconds))
-        tri_times.append(float(t))
+        tri_times.append(float(times[idx]))
         world_points.append(tri["world_point"])
         ray_gaps.append(tri["ray_gap"])
         reprojection_errors.append(tri["reprojection_error"])
         image_points_left.append(point_a)
         image_points_right.append(point_b)
-        conf_pairs.append((conf_a, conf_b))
+        conf_pairs.append((float(conf_a[idx]), float(conf_b[idx])))
 
     if len(world_points) < 8:
         return None
@@ -907,11 +924,17 @@ def find_best_time_offset(track_a, config_a, track_b, config_b):
     search_radius = 15.0 / fps_max  # expanded: ±15 frames
     offsets = np.arange(-search_radius, search_radius + step * 0.5, step)
 
+    # 插值器只依赖轨迹本身、与 offset 无关，循环外构建一次复用
+    interp_a = build_track_interpolators(track_a)
+    interp_b = build_track_interpolators(track_b)
+
     best_offset = None
     best_candidate = None
     best_score = None
     for offset in offsets:
-        candidate = build_triangulation_candidate(track_a, config_a, track_b, config_b, float(offset))
+        candidate = build_triangulation_candidate(
+            track_a, config_a, track_b, config_b, float(offset),
+            interp_a=interp_a, interp_b=interp_b)
         if candidate is None:
             continue
         score = candidate["score"]
@@ -1200,7 +1223,22 @@ def render_trajectory_plot(sample_name, trajectory, camera_configs, out_path):
     cv2.imwrite(str(out_path), canvas)
 
 
-def process_sample(sample_dir, camera_configs, model, imgsz, conf):
+_CUDA_FLAG = None
+
+
+def _cuda_available():
+    """是否可用 CUDA（懒加载 + 缓存）。CPU 下并行检测会线程超订反而更慢。"""
+    global _CUDA_FLAG
+    if _CUDA_FLAG is None:
+        try:
+            import torch
+            _CUDA_FLAG = bool(torch.cuda.is_available())
+        except Exception:
+            _CUDA_FLAG = False
+    return _CUDA_FLAG
+
+
+def process_sample(sample_dir, camera_configs, model, imgsz, conf, model_path=None):
     video_paths = sorted(sample_dir.glob("*.mp4"))
     if len(video_paths) != 2:
         raise RuntimeError(f"{sample_dir} 下应当正好有 2 个视频，当前为 {len(video_paths)} 个。")
@@ -1213,13 +1251,23 @@ def process_sample(sample_dir, camera_configs, model, imgsz, conf):
     for video_path, config in assignment.items():
         print(f"  {video_path.name} -> {config.name} ({config.reference_image_path.name})")
 
-    tracks = []
-    for video_path in video_paths:
+    def _detect_one(video_path, m):
         config = assignment[video_path]
-        print(f"[{sample_dir.name}] 检测足球并提取 2D 轨迹: {video_path.name}")
-        track = detect_video_track(video_path, config, model, imgsz=imgsz, conf=conf)
-        print(f"  kick_frame={track.kick_frame}, detected_points={len(track.image_points)}")
-        tracks.append(track)
+        print(f"[{sample_dir.name}] 检测足球并提取 2D 轨迹: {video_path.name}", flush=True)
+        track = detect_video_track(video_path, config, m, imgsz=imgsz, conf=conf)
+        print(f"  kick_frame={track.kick_frame}, detected_points={len(track.image_points)}", flush=True)
+        return track
+
+    # 左右两路并行检测：仅在 GPU(CUDA) 上并行（GPU 可并发流）；CPU 上 PyTorch
+    # 已用多线程做算子并行，双路并发反而线程超订导致更慢，故 CPU 保持串行。
+    # 每个线程使用独立的模型实例，避免共享 ultralytics predictor 的竞态。
+    if model_path is not None and _cuda_available():
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            models = [model, YOLO(model_path)]
+            futures = [ex.submit(_detect_one, vp, m) for vp, m in zip(video_paths, models)]
+            tracks = [f.result() for f in futures]
+    else:
+        tracks = [_detect_one(vp, model) for vp in video_paths]
 
     tracks_by_name = {track.camera_name: track for track in tracks}
     configs_by_name = {config.name: config for config in camera_configs}
@@ -1297,8 +1345,17 @@ def main():
         raise FileNotFoundError("未找到 sample 目录。")
 
     model = YOLO(args.yolo_model)
+    # 预热：仅 GPU 需要编译 CUDA kernel；CPU 上无 kernel 可编译，反而徒增启动耗时
+    if _cuda_available():
+        try:
+            model.predict(np.zeros((640, 640, 3), dtype=np.uint8),
+                          classes=[SPORTS_BALL_CLASS_ID], imgsz=320, conf=0.25,
+                          verbose=False)
+        except Exception:
+            pass
     for sample_dir in sample_dirs:
-        process_sample(sample_dir, camera_configs, model, imgsz=args.imgsz, conf=args.conf)
+        process_sample(sample_dir, camera_configs, model, imgsz=args.imgsz,
+                       conf=args.conf, model_path=args.yolo_model)
 
 
 if __name__ == "__main__":

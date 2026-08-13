@@ -84,6 +84,23 @@ public record GoalkeeperInfo(
     string FilePath
 );
 
+/// <summary>门将属性（从 data/goalkeepers/*.json 解析，雷达图用）</summary>
+public class GoalkeeperStats
+{
+    public string DisplayName { get; set; } = "";
+    public string Description { get; set; } = "";
+    public float Height { get; set; } = 1.9f;
+    public float DiveSpeed { get; set; } = 4f;
+    public float JumpDistance { get; set; } = 1f;
+    public float JumpHeight { get; set; } = 0.5f;
+    public float Reach { get; set; } = 0.5f;
+    public float TendGoalSpeed { get; set; } = 3f;
+    public float TendGoalDistance { get; set; } = 3f;
+    public float GoalKeeping { get; set; } = 0.85f;
+    public float SidePreference { get; set; } = 0f;
+    public float HeightPreference { get; set; } = 0f;
+}
+
 /// <summary>样本选择包装（用于 Pipeline 复选框绑定）</summary>
 public class SampleItem : INotifyPropertyChanged
 {

@@ -54,9 +54,10 @@ public class EnvironmentService : IEnvironmentService
         {
             if (errors == System.Net.Security.SslPolicyErrors.None)
                 return true;
-            // 仅在没有证书链问题时允许
-            Debug.WriteLine($"[SSL] 证书警告: {errors}");
-            return true; // 宽松模式，允许自签名证书
+            // 仅放行证书链问题（自签名/企业内网 CA），拒绝主机名不匹配
+            bool allow = errors == System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors;
+            Debug.WriteLine($"[SSL] 证书校验: {errors} -> {(allow ? "放行" : "拒绝")}");
+            return allow;
         };
 
         _http = new HttpClient(handler)

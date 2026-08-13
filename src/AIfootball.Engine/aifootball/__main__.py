@@ -52,39 +52,45 @@ def run_script(script_name: str, args: list, workspace: str, pipeline_dir: Path)
 
 
 def run_offline_pipeline(samples, skip_reconstruct, skip_ballistic, workspace, pipeline_dir):
-    """对给定样本依次执行 3D 重建 -> 弹道拟合 -> Unity 导出。"""
+    """对给定样本依次执行 3D 重建 -> 弹道拟合 -> Unity 导出。
+
+    三个脚本都支持一次传入多个 --samples，因此按阶段批量调用，
+    避免每个样本单独启动一个 Python 进程、重复加载 YOLO/torch/CUDA。
+    """
+    samples = list(samples)
     all_ok = True
-    for name in samples:
-        sa = ["--samples", name]
-        if not skip_reconstruct:
-            print(f"[1/3] 3D 重建: {name}")
-            r = run_script("reconstruct_3d_trajectory.py", sa, workspace, pipeline_dir)
-            if r.returncode != 0:
-                print(f"  失败 (exit={r.returncode})")
-                all_ok = False
-                continue
 
-        if not skip_ballistic:
-            print(f"[2/3] 弹道拟合: {name}")
-            r = run_script("fit_ballistic_trajectory.py", sa, workspace, pipeline_dir)
-            if r.returncode != 0:
-                print(f"  失败 (exit={r.returncode})")
-                all_ok = False
-                continue
-
-        print(f"[3/3] Unity 导出: {name}")
-        r = run_script("export_unity_trajectory.py", sa, workspace, pipeline_dir)
+    if not skip_reconstruct:
+        print(f"[1/3] 3D 重建: {len(samples)} 个样本")
+        r = run_script("reconstruct_3d_trajectory.py", ["--samples", *samples],
+                       workspace, pipeline_dir)
         if r.returncode != 0:
             print(f"  失败 (exit={r.returncode})")
             all_ok = False
-            continue
 
+    if not skip_ballistic and all_ok:
+        print(f"[2/3] 弹道拟合: {len(samples)} 个样本")
+        r = run_script("fit_ballistic_trajectory.py", ["--samples", *samples],
+                       workspace, pipeline_dir)
+        if r.returncode != 0:
+            print(f"  失败 (exit={r.returncode})")
+            all_ok = False
+
+    if all_ok:
+        print(f"[3/3] Unity 导出: {len(samples)} 个样本")
+        r = run_script("export_unity_trajectory.py", ["--samples", *samples],
+                       workspace, pipeline_dir)
+        if r.returncode != 0:
+            print(f"  失败 (exit={r.returncode})")
+            all_ok = False
+
+    for name in samples:
         csv_path = Path(workspace).resolve() / "data" / f"{name}_trajectory.csv"
         if not csv_path.is_file():
-            print(f"  失败：未生成 Unity CSV: {csv_path}")
+            print(f"  {name} 失败：未生成 Unity CSV: {csv_path}")
             all_ok = False
-            continue
-        print(f"  {name} 完成")
+        else:
+            print(f"  {name} 完成")
 
     return all_ok
 

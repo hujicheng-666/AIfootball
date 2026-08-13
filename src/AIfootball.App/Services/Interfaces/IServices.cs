@@ -59,6 +59,9 @@ public interface IPipelineService
     /// <summary>扫描门将数据</summary>
     List<GoalkeeperInfo> ScanGoalkeepers();
 
+    /// <summary>加载门将属性数据（雷达图用），失败返回 null</summary>
+    GoalkeeperStats? LoadGoalkeeperStats(string name);
+
     /// <summary>获取标定状态</summary>
     CalibrationStatus GetCalibrationStatus();
 

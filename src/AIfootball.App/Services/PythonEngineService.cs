@@ -69,19 +69,25 @@ public class PythonEngineService : IPythonEngine
 
         using var proc = new Process { StartInfo = psi };
 
-        var output = new System.Text.StringBuilder();
-        var error = new System.Text.StringBuilder();
+        // 仅保留最近若干行输出，避免长时间任务日志无上限增长内存
+        const int maxBufferedLines = 2000;
+        var outputLines = new List<string>();
+        var errorLines = new List<string>();
 
         proc.OutputDataReceived += (_, e) =>
         {
             if (e.Data == null) return;
-            output.AppendLine(e.Data);
+            if (outputLines.Count >= maxBufferedLines)
+                outputLines.RemoveAt(0);
+            outputLines.Add(e.Data);
             outputReceived?.Invoke(e.Data);
         };
         proc.ErrorDataReceived += (_, e) =>
         {
             if (e.Data == null) return;
-            error.AppendLine(e.Data);
+            if (errorLines.Count >= maxBufferedLines)
+                errorLines.RemoveAt(0);
+            errorLines.Add(e.Data);
             errorReceived?.Invoke(e.Data);
         };
 
@@ -100,17 +106,18 @@ public class PythonEngineService : IPythonEngine
         {
             if (!proc.HasExited)
                 proc.Kill(entireProcessTree: true);
-            return (-1, output.ToString(), "操作超时或被取消");
+            return (-1, string.Join(Environment.NewLine, outputLines), "操作超时或被取消");
         }
 
-        return (proc.ExitCode, output.ToString(), error.ToString());
+        return (proc.ExitCode, string.Join(Environment.NewLine, outputLines),
+                string.Join(Environment.NewLine, errorLines));
     }
 
     public async Task<bool> IsEnvironmentReadyAsync()
     {
         if (!File.Exists(_pythonExe)) return false;
 
-        var result = await Task.Run(() =>
+        var result = await Task.Run(async () =>
         {
             var psi = new ProcessStartInfo
             {
@@ -124,8 +131,16 @@ public class PythonEngineService : IPythonEngine
             };
             using var p = Process.Start(psi);
             if (p == null) return (1, "");
-            p.WaitForExit(10000);
-            return (p.ExitCode, p.StandardOutput.ReadToEnd());
+            // 先异步读取 stdout/stderr，再等待退出，避免输出缓冲填满导致死锁
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var stderrTask = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(10000))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                return (1, "");
+            }
+            await Task.WhenAll(stdoutTask, stderrTask);
+            return (p.ExitCode, stdoutTask.Result);
         });
 
         return result.Item1 == 0 && result.Item2.Contains("OK");

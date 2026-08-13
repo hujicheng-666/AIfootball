@@ -8,8 +8,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from scipy.integrate import solve_ivp
-from scipy.optimize import minimize
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -19,17 +17,19 @@ except Exception:
 
 
 from project.config import WORKSPACE as WORKSPACE_DIR, CALIB
+from project.constants import (
+    GRAVITY,
+    PENALTY_SPOT_WORLD,
+    FIELD_X_LIMITS,
+    FIELD_Y_LIMITS,
+    GOAL_LINE_Y,
+    GOAL_HALF_WIDTH_M,
+    GOAL_HEIGHT_M,
+)
 
 INPUT_ROOT = WORKSPACE_DIR / "output" / "trajectory_3d"
 OUTPUT_ROOT = WORKSPACE_DIR / "output" / "trajectory_ballistic"
-GRAVITY = 9.81
-FIELD_X_LIMITS = (-15.0, 15.0)
-FIELD_Y_LIMITS = (-5.0, 25.0)
 Z_LIMITS = (-0.5, 4.5)
-GOAL_LINE_Y = 0.0
-GOAL_HALF_WIDTH_M = 7.32 / 2.0
-GOAL_HEIGHT_M = 2.44
-PENALTY_SPOT_WORLD = np.array([0.0, 11.0, 0.0], dtype=np.float64)
 
 
 @dataclass
@@ -199,184 +199,12 @@ def fit_ballistic_from_origin(times_abs, points, weights, origin_time_sec, origi
 
 
 def evaluate_ballistic(params, times_abs, time_origin_sec):
-    if len(params) == 7:
-        return evaluate_ballistic_drag(params, times_abs, time_origin_sec)
     x0, vx, y0, vy, z0, vz = params
     tau = np.asarray(times_abs, dtype=np.float64) - float(time_origin_sec)
     x = x0 + vx * tau
     y = y0 + vy * tau
     z = z0 + vz * tau - 0.5 * GRAVITY * (tau ** 2)
     return np.column_stack([x, y, z])
-
-
-# ── Football physical constants ──
-BALL_MASS_KG = 0.43       # FIFA standard
-BALL_RADIUS_M = 0.11      # size 5
-BALL_AREA_M2 = np.pi * BALL_RADIUS_M ** 2
-AIR_DENSITY = 1.225       # kg/m³ at sea level, 15°C
-DRAG_COEFF_NOMINAL = 0.25  # typical for smooth sphere at Re ~ 10⁵
-K_DRAG_FACTOR = 0.5 * AIR_DENSITY * DRAG_COEFF_NOMINAL * BALL_AREA_M2 / BALL_MASS_KG
-
-
-def _drag_ode(t, state, k_drag):
-    """ODE for ballistic motion with quadratic air drag.
-    state = [x, y, z, vx, vy, vz]"""
-    vx, vy, vz = state[3], state[4], state[5]
-    speed = np.sqrt(vx*vx + vy*vy + vz*vz)
-    drag = k_drag * speed
-    return [vx, vy, vz,
-            -drag * vx,
-            -drag * vy,
-            -GRAVITY - drag * vz]
-
-
-def evaluate_ballistic_drag(params, times_abs, time_origin_sec):
-    """Evaluate trajectory with air drag using numerical integration.
-    The initial state (x0, y0, z0, vx0, vy0, vz0) is defined at time_origin_sec (tau=0).
-    Handles evaluation at times both before and after time_origin_sec correctly."""
-    x0, vx0, y0, vy0, z0, vz0, k_drag = params
-    tau = np.asarray(times_abs, dtype=np.float64) - float(time_origin_sec)
-    if len(tau) == 0:
-        return np.empty((0, 3))
-
-    state0 = [x0, y0, z0, vx0, vy0, vz0]
-    t_min, t_max = float(np.min(tau)), float(np.max(tau))
-    result = np.empty((len(tau), 3), dtype=np.float64)
-
-    # Split: negative tau (backward integration) and non-negative tau (forward)
-    neg_mask = tau < 0
-    pos_mask = tau >= 0
-
-    if np.any(pos_mask):
-        tau_pos = tau[pos_mask]
-        t_eval_pos = tau_pos  # tau is relative to time_origin (tau=0)
-        sol = solve_ivp(
-            _drag_ode, [0.0, t_max + 0.01],
-            state0,
-            args=(k_drag,),
-            t_eval=t_eval_pos,
-            method='RK45', rtol=1e-6, atol=1e-8
-        )
-        result[pos_mask] = np.column_stack([sol.y[0], sol.y[1], sol.y[2]])
-
-    if np.any(neg_mask):
-        tau_neg = tau[neg_mask]
-        # Integrate backwards: t goes from 0 to t_min (negative).
-        # solve_ivp requires t_eval sorted in the same direction as t_span.
-        sort_idx = np.argsort(tau_neg)[::-1]  # decreasing: 0 → t_min
-        tau_neg_sorted = tau_neg[sort_idx]
-        sol = solve_ivp(
-            _drag_ode, [0.0, t_min - 0.01],
-            state0,
-            args=(k_drag,),
-            t_eval=tau_neg_sorted,
-            method='RK45', rtol=1e-6, atol=1e-8
-        )
-        # Reorder back to original tau order
-        inv_idx = np.argsort(sort_idx)
-        result[neg_mask] = np.column_stack([sol.y[0][inv_idx], sol.y[1][inv_idx], sol.y[2][inv_idx]])
-
-    return result
-
-
-def _fit_drag_from_params(init_guess, times_abs, points, weights, time_origin_sec):
-    """Fit drag model parameters using optimization with physical constraints."""
-    points = np.asarray(points, dtype=np.float64)
-    weights = np.clip(np.asarray(weights, dtype=np.float64), 1e-8, None)
-    k_min, k_max = 0.002, 0.08  # physically plausible range for a football
-
-    def cost(p):
-        x0, vx, y0, vy, z0, vz, k = p
-        # Hard constraints
-        if k < k_min or k > k_max or z0 < -2.0 or z0 > 5.0:
-            return 1e9
-        params7 = (x0, vx, y0, vy, z0, vz, k)
-        try:
-            fitted = evaluate_ballistic_drag(params7, times_abs, time_origin_sec)
-        except Exception:
-            return 1e9
-        residuals = np.linalg.norm(points - fitted, axis=1)
-        rmse = float(np.sqrt(np.average(residuals ** 2, weights=weights)))
-        # Penalize unphysical: negative peak, excessive height
-        peak_z = float(np.max(fitted[:, 2]))
-        penalty = 0.0
-        if peak_z < 0.05:
-            penalty += (0.05 - peak_z) * 50.0
-        if peak_z > 5.0:
-            penalty += (peak_z - 5.0) * 10.0
-        return rmse + penalty
-
-    result = minimize(cost, init_guess, method='Nelder-Mead',
-                      options={'maxiter': 800, 'xatol': 1e-6})
-    return result.x, result.fun
-
-
-def _find_peak_time_drag(params, time_origin_sec):
-    """Find peak z numerically for drag model."""
-    ts = np.linspace(0, 3.0, 300)
-    pts = evaluate_ballistic_drag(params, ts + time_origin_sec, time_origin_sec)
-    idx = np.argmax(pts[:, 2])
-    return float(ts[idx])
-
-
-def _find_landing_drag(params, time_origin_sec):
-    """Find landing time (z=0) numerically for drag model."""
-    ts = np.linspace(0, 5.0, 500)
-    pts = evaluate_ballistic_drag(params, ts + time_origin_sec, time_origin_sec)
-    for i in range(1, len(ts)):
-        if pts[i, 2] <= 0 and pts[i-1, 2] >= 0:
-            frac = pts[i-1, 2] / (pts[i-1, 2] - pts[i, 2] + 1e-10)
-            t_land = ts[i-1] + frac * (ts[i] - ts[i-1])
-            return float(t_land), pts[i-1] + frac * (pts[i] - pts[i-1])
-    return None, None
-
-
-def _find_launch_drag(params, time_origin_sec):
-    """Find launch time (z=0) numerically for drag model, going backwards."""
-    ts = np.linspace(-2.0, 0.0, 500)
-    pts = evaluate_ballistic_drag(params, ts + time_origin_sec, time_origin_sec)
-    for i in range(len(ts) - 1, 0, -1):
-        if pts[i, 2] >= 0 and pts[i - 1, 2] <= 0:
-            frac = pts[i - 1, 2] / (pts[i - 1, 2] - pts[i, 2] + 1e-10)
-            t_launch = ts[i - 1] + frac * (ts[i] - ts[i - 1])
-            return float(t_launch)
-    return None
-
-
-def fit_ballistic_with_drag(times_abs, points, weights, time_origin_sec, parabolic_params=None):
-    """Given parabolic parameters, evaluate drag model with different k and pick best.
-    If parabolic_params is None, fit parabolic from data first."""
-    points = np.asarray(points, dtype=np.float64)
-    weights = np.clip(np.asarray(weights, dtype=np.float64), 1e-8, None)
-
-    if parabolic_params is not None:
-        x0_p, vx_p, y0_p, vy_p, z0_p, vz_p = parabolic_params[:6]
-    else:
-        tau = np.asarray(times_abs, dtype=np.float64) - float(time_origin_sec)
-        x0_p, vx_p = weighted_linear_fit(tau, points[:, 0], weights)
-        y0_p, vy_p = weighted_linear_fit(tau, points[:, 1], weights)
-        z_target = points[:, 2] + 0.5 * GRAVITY * (tau ** 2)
-        z0_p, vz_p = weighted_linear_fit(tau, z_target, weights)
-
-    # Try each k, pick the one that best matches the data
-    best_rmse = float('inf')
-    best_k = K_DRAG_FACTOR
-    for k_try in [0.002, 0.005, 0.01, 0.015, 0.02, 0.03, 0.04]:
-        p = np.array([x0_p, vx_p, y0_p, vy_p, z0_p, vz_p, k_try])
-        try:
-            fitted = evaluate_ballistic_drag(p, times_abs, time_origin_sec)
-        except Exception:
-            continue
-        res = np.linalg.norm(points - fitted, axis=1)
-        rmse = float(np.sqrt(np.average(res ** 2, weights=weights)))
-        if rmse < best_rmse:
-            best_rmse = rmse
-            best_k = k_try
-
-    param_k = [x0_p, vx_p, y0_p, vy_p, z0_p, vz_p, best_k]
-    fitted = evaluate_ballistic_drag(param_k, times_abs, time_origin_sec)
-    residuals = np.linalg.norm(points - fitted, axis=1)
-    return param_k, fitted, residuals
 
 
 def compose_params_from_penalty_launch(launch_time_sec, vx, vy, vz_launch, reference_time_sec):
@@ -1326,34 +1154,26 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
     if np.count_nonzero(final_mask) >= 8:
         mask = final_mask
 
-    use_drag = len(params) == 7
+    # 纯重力抛物线模型（空气阻力模型已废弃移除）
     x0, vx, y0, vy, z0, vz = params[:6]
-    k_drag = float(params[6]) if use_drag else None
-    tau_peak = max(0.0, vz / GRAVITY) if not use_drag else _find_peak_time_drag(params, time_origin_sec)
+    k_drag = None
+    tau_peak = max(0.0, vz / GRAVITY)
     peak_time_sec = time_origin_sec + tau_peak
     peak_point = evaluate_ballistic(params, np.array([peak_time_sec], dtype=np.float64), time_origin_sec)[0]
 
     landing_time_sec = None
     landing_point = None
     launch_time_sec = None
-    if use_drag:
-        landing_time_sec, landing_point_raw = _find_landing_drag(params, time_origin_sec)
-        if landing_point_raw is not None:
-            landing_point = landing_point_raw
-        launch_tau = _find_launch_drag(params, time_origin_sec)
-        if launch_tau is not None and launch_tau <= 0.0:
-            launch_time_sec = time_origin_sec + launch_tau
-    else:
-        disc = vz * vz + 2.0 * GRAVITY * z0
-        if disc >= 0.0:
-            sqrt_disc = math.sqrt(disc)
-            tau_launch = (vz - sqrt_disc) / GRAVITY
-            if tau_launch <= 0.0:
-                launch_time_sec = time_origin_sec + tau_launch
-            tau_land = (vz + sqrt_disc) / GRAVITY
-            if tau_land >= 0.0:
-                landing_time_sec = time_origin_sec + tau_land
-                landing_point = evaluate_ballistic(params, np.array([landing_time_sec], dtype=np.float64), time_origin_sec)[0]
+    disc = vz * vz + 2.0 * GRAVITY * z0
+    if disc >= 0.0:
+        sqrt_disc = math.sqrt(disc)
+        tau_launch = (vz - sqrt_disc) / GRAVITY
+        if tau_launch <= 0.0:
+            launch_time_sec = time_origin_sec + tau_launch
+        tau_land = (vz + sqrt_disc) / GRAVITY
+        if tau_land >= 0.0:
+            landing_time_sec = time_origin_sec + tau_land
+            landing_point = evaluate_ballistic(params, np.array([landing_time_sec], dtype=np.float64), time_origin_sec)[0]
 
     observed_goal_line_crossing_time_sec, observed_goal_line_crossing_point = detect_goal_line_crossing(full_times, full_points)
     observed_goal_line_crossing_phase = classify_goal_line_phase(
@@ -1494,7 +1314,7 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
         vz=vz,
         gravity=GRAVITY,
         k_drag=k_drag,
-        use_drag_model=use_drag,
+        use_drag_model=False,
         rmse_m=rmse_m,
         max_residual_m=max_residual_m,
         reprojection_rmse_px=reprojection_rmse_px,

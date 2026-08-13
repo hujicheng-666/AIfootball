@@ -188,6 +188,13 @@ public class PipelineViewModel : ViewModelBase
 
     private CancellationTokenSource? _cts;
 
+    // ─── 批次处理进度状态机（一次跑完所有样本的同一阶段） ───
+    private List<string> _processingSamples = new();
+    private int _stageBase;
+    private int _stageSpan = 100;
+    private string _stageDescription = "";
+    private int _currentSampleIndex;
+
     private async Task RunOfflineAsync()
     {
         if (!_mainVm.IsEnvironmentReady)
@@ -240,7 +247,7 @@ public class PipelineViewModel : ViewModelBase
             }
             _mainVm.AddLog(success ? "success" : "error",
                 success ? "======== 全部完成 ========" : "======== 处理失败 ========");
-            _mainVm.RefreshLists();
+            await _mainVm.RefreshListsAsync();
         }
         catch (Exception ex)
         {
@@ -313,7 +320,7 @@ public class PipelineViewModel : ViewModelBase
             }
             _mainVm.AddLog(success ? "success" : "error",
                 success ? "录制与处理完成" : "录制或处理失败");
-            _mainVm.RefreshLists();
+            await _mainVm.RefreshListsAsync();
         }
         catch (Exception ex)
         {
@@ -372,6 +379,12 @@ public class PipelineViewModel : ViewModelBase
 
     private void InitSteps(List<string> samples)
     {
+        _processingSamples = samples.ToList();
+        _stageBase = 0;
+        _stageSpan = 100;
+        _stageDescription = "";
+        _currentSampleIndex = 0;
+
         Steps.Clear();
         foreach (var name in samples)
         {
@@ -390,21 +403,31 @@ public class PipelineViewModel : ViewModelBase
 
         if (message.Contains("[1/3]", StringComparison.Ordinal))
         {
-            StartNextStep("3D 重建");
+            BeginStage("3D 重建");
             return;
         }
 
         if (message.Contains("[2/3]", StringComparison.Ordinal))
         {
-            FinishRunningStep(StepStatus.Completed);
-            StartNextStep("弹道拟合");
+            EndStage();
+            BeginStage("弹道拟合");
             return;
         }
 
         if (message.Contains("[3/3]", StringComparison.Ordinal))
         {
-            FinishRunningStep(StepStatus.Completed);
-            StartNextStep("Unity 导出");
+            EndStage();
+            BeginStage("Unity 导出");
+            return;
+        }
+
+        // 样本名 [sampleX] → 推进该样本在当前阶段的步骤
+        var sampleMatch = Regex.Match(message, @"^\[(.+?)\]");
+        if (sampleMatch.Success)
+        {
+            int idx = _processingSamples.IndexOf(sampleMatch.Groups[1].Value);
+            if (idx >= 0 && !string.IsNullOrEmpty(_stageDescription))
+                MarkSampleStep(idx);
             return;
         }
 
@@ -412,70 +435,117 @@ public class PipelineViewModel : ViewModelBase
             || message.Contains("Traceback", StringComparison.Ordinal))
         {
             FinishRunningStep(StepStatus.Failed);
-            return;
+        }
+    }
+
+    private void BeginStage(string description)
+    {
+        _stageDescription = description;
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            if (Steps[i].Description == description && Steps[i].Status == StepStatus.Pending)
+            {
+                Steps[i] = Steps[i] with { Status = StepStatus.Running };
+                return;
+            }
+        }
+    }
+
+    private void EndStage()
+    {
+        if (string.IsNullOrEmpty(_stageDescription)) return;
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            if (Steps[i].Description == _stageDescription && Steps[i].Status == StepStatus.Running)
+                Steps[i] = Steps[i] with { Status = StepStatus.Completed };
+        }
+    }
+
+    private void MarkSampleStep(int sampleIndex)
+    {
+        if (sampleIndex < 0 || sampleIndex >= _processingSamples.Count) return;
+        string name = _processingSamples[sampleIndex];
+
+        // 同阶段其它样本的 Running 步骤 → Completed
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            if (Steps[i].Description == _stageDescription
+                && Steps[i].Status == StepStatus.Running
+                && Steps[i].Name != name)
+            {
+                Steps[i] = Steps[i] with { Status = StepStatus.Completed };
+            }
         }
 
-        if (message.Contains("完成", StringComparison.Ordinal))
-            FinishRunningStep(StepStatus.Completed);
+        // 当前样本步骤 → Running
+        for (var i = 0; i < Steps.Count; i++)
+        {
+            if (Steps[i].Description == _stageDescription
+                && Steps[i].Name == name
+                && Steps[i].Status == StepStatus.Pending)
+            {
+                Steps[i] = Steps[i] with { Status = StepStatus.Running };
+                break;
+            }
+        }
     }
 
     private void UpdateProcessingProgress(string message)
     {
-        // 阶段切换：把各阶段子进度映射到总进度区间（3D重建 0-60%，弹道拟合 60-85%，导出 85-100%）
-        if (message.Contains("[1/3]", StringComparison.Ordinal))
-        {
-            ProcessingProgress = 0;
-            ProcessingProgressText = "三维重建中...";
-            return;
-        }
-
-        if (message.Contains("[2/3]", StringComparison.Ordinal))
-        {
-            ProcessingProgress = 60;
-            ProcessingProgressText = "弹道拟合中...";
-            return;
-        }
-
-        if (message.Contains("[3/3]", StringComparison.Ordinal))
-        {
-            ProcessingProgress = 85;
-            ProcessingProgressText = "Unity 导出中...";
-            return;
-        }
-
-        if (message.Contains("全部完成", StringComparison.Ordinal))
-        {
-            ProcessingProgress = 100;
-            ProcessingProgressText = "全部完成";
-            return;
-        }
-
-        Match match = Regex.Match(message, @"\((\d{1,3})%\)");
-        if (!match.Success || !int.TryParse(match.Groups[1].Value, out int percent))
+        if (string.IsNullOrWhiteSpace(message))
             return;
 
-        // 检测阶段（密集跟踪/起脚定位）的百分比映射到 3D 重建区间 0-60，其余阶段直接显示
-        if (message.Contains("密集跟踪", StringComparison.Ordinal)
-            || message.Contains("起脚定位", StringComparison.Ordinal))
+        if (message.Contains("[1/3]", StringComparison.Ordinal)) { EnterStage("3D 重建", 0, 60, "三维重建中..."); return; }
+        if (message.Contains("[2/3]", StringComparison.Ordinal)) { EnterStage("弹道拟合", 60, 25, "弹道拟合中..."); return; }
+        if (message.Contains("[3/3]", StringComparison.Ordinal)) { EnterStage("Unity 导出", 85, 15, "Unity 导出中..."); return; }
+        if (message.Contains("全部完成", StringComparison.Ordinal)) { ProcessingProgress = 100; ProcessingProgressText = "全部完成"; return; }
+
+        var sampleMatch = Regex.Match(message, @"^\[(.+?)\]");
+        if (sampleMatch.Success)
         {
-            ProcessingProgress = Math.Clamp((int)Math.Round(percent * 0.60), 0, 60);
+            int idx = _processingSamples.IndexOf(sampleMatch.Groups[1].Value);
+            if (idx >= 0)
+            {
+                _currentSampleIndex = idx;
+                // 拟合/导出阶段没有百分比输出，用样本序号推进进度
+                int n = Math.Max(1, _processingSamples.Count);
+                if (_stageDescription == "弹道拟合" || _stageDescription == "Unity 导出")
+                {
+                    ProcessingProgress = Math.Clamp(
+                        _stageBase + (int)Math.Round((idx + 1.0) / n * _stageSpan), 0, 100);
+                }
+            }
         }
+
+        var m = Regex.Match(message, @"\((\d{1,3})%\)");
+        if (!m.Success || !int.TryParse(m.Groups[1].Value, out int percent))
+            return;
+
+        int count = Math.Max(1, _processingSamples.Count);
+        int sampleIdx = Math.Clamp(_currentSampleIndex, 0, count - 1);
+
+        // 重建阶段：起脚定位约占样本内 20%，密集跟踪约占 80%，避免两段各自 0-100% 导致进度回退
+        double sampleFraction;
+        if (message.Contains("起脚定位", StringComparison.Ordinal))
+            sampleFraction = percent / 100.0 * 0.2;
+        else if (message.Contains("密集跟踪", StringComparison.Ordinal))
+            sampleFraction = 0.2 + percent / 100.0 * 0.8;
         else
-        {
-            ProcessingProgress = Math.Clamp(percent, 0, 100);
-        }
+            sampleFraction = percent / 100.0;
+
+        ProcessingProgress = Math.Clamp(
+            _stageBase + (int)Math.Round((sampleIdx + sampleFraction) / count * _stageSpan), 0, 100);
         ProcessingProgressText = message.Trim();
     }
 
-    private void StartNextStep(string description)
+    private void EnterStage(string description, int basePercent, int span, string text)
     {
-        for (var index = 0; index < Steps.Count; index++)
-        {
-            if (Steps[index].Description != description || Steps[index].Status != StepStatus.Pending)
-                continue;
-            Steps[index] = Steps[index] with { Status = StepStatus.Running };
-            return;
-        }
+        _stageDescription = description;
+        _stageBase = basePercent;
+        _stageSpan = span;
+        _currentSampleIndex = 0;
+        ProcessingProgress = basePercent;
+        ProcessingProgressText = text;
     }
 
     private void FinishRunningStep(StepStatus status)

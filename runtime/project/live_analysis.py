@@ -24,6 +24,7 @@ import cv2
 import numpy as np
 
 from project.camera_capture import DualCameraRecorder
+from project.config import WORKSPACE as WORKSPACE_DIR
 from project.reconstruct_3d_trajectory import (
     OUTPUT_ROOT,
     SPORTS_BALL_CLASS_ID,
@@ -78,10 +79,10 @@ class _CamTracker:
             model, frame, predicted, self.penalty_center, imgsz, conf,
             self.frame_w, self.frame_h, velocity_mag=vel)
 
-        # 裁剪检测失败时回退到全帧 YOLO
+        # 裁剪检测失败时回退到全帧 YOLO（兜底只做粗分辨率）
         if chosen is None and self.penalty_center is not None:
             result = model.predict(frame, classes=[SPORTS_BALL_CLASS_ID],
-                                   conf=conf, imgsz=imgsz, verbose=False)[0]
+                                   conf=conf, imgsz=min(imgsz, 640), verbose=False)[0]
             boxes = [] if result.boxes is None else list(result.boxes)
             chosen = pick_detection(boxes, predicted, self.penalty_center)
 
@@ -290,10 +291,20 @@ def run(cam_left="0", cam_right="1", sample_name="sample_live",
 
     # YOLO 模型
     from ultralytics import YOLO
-    model_path = os.environ.get("YOLO_MODEL_PATH") or "yolo11m.pt"
+    model_path = os.environ.get("YOLO_MODEL_PATH") or str(WORKSPACE_DIR / "models" / "yolo11m.pt")
     if not Path(model_path).exists():
         print(f"YOLO 模型不存在，将自动下载: {model_path}")
     model = YOLO(model_path)
+
+    # 预热：仅 GPU 需要编译 CUDA kernel，减少首帧延迟
+    try:
+        import torch
+        if torch.cuda.is_available():
+            model.predict(np.zeros((640, 640, 3), dtype=np.uint8),
+                          classes=[SPORTS_BALL_CLASS_ID], imgsz=320, conf=0.25,
+                          verbose=False)
+    except Exception:
+        pass
 
     # 相机标定（缺失则仅 2D 叠加）
     left_cfg = right_cfg = None

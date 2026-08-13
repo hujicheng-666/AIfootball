@@ -10,25 +10,11 @@
 ```
 src/
 ├── AIfootball.sln                  # Visual Studio 解决方案
-├── AIfootball.Engine/              # Python 推理引擎
+├── AIfootball.Engine/              # Python 引擎 CLI（算法主体在 runtime/project/）
 │   ├── aifootball/
-│   │   ├── __main__.py             # CLI 入口
-│   │   ├── config.py               # 全局配置
-│   │   ├── calibration/            # 相机标定
-│   │   │   ├── intrinsics.py       # 内参标定（棋盘格）
-│   │   │   └── extrinsics.py       # 外参标定（立体视觉）
-│   │   ├── capture/                # 视频采集
-│   │   │   └── dual_camera.py      # 双摄同步录制
-│   │   ├── detection/              # 目标检测
-│   │   │   └── ball_detector.py    # YOLO 足球检测
-│   │   ├── reconstruction/         # 3D 重建
-│   │   │   └── triangulator.py     # 双目三角测量
-│   │   ├── trajectory/             # 轨迹处理
-│   │   │   ├── ballistic_fit.py    # 弹道拟合
-│   │   │   └── export.py           # Unity CSV 导出
-│   │   └── pipeline/               # 流水线编排
-│   │       ├── offline.py          # 离线批处理
-│   │       └── online.py           # 在线实时处理
+│   │   ├── __main__.py             # CLI 入口（委托 runtime/project 脚本）
+│   │   └── capture/
+│   │       └── dual_camera.py      # 双摄同步录制
 │   ├── requirements.txt
 │   └── pyproject.toml
 │

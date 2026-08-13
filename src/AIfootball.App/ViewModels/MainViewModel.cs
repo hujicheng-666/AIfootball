@@ -25,7 +25,7 @@ public class MainViewModel : ViewModelBase
         _environmentService = environmentService;
         _gpuService = gpuService;
 
-        RefreshCommand = new RelayCommand(OnRefresh);
+        RefreshCommand = new RelayCommand(async () => await OnRefreshAsync());
         SetupEnvironmentCommand = new RelayCommand(async () => await OnSetupEnvironment());
     }
 
@@ -192,7 +192,7 @@ public class MainViewModel : ViewModelBase
         // 4. 扫描数据
         try
         {
-            RefreshLists();
+            await RefreshListsAsync();
             AddLog("info", $"📦 样本: {SampleCount} 个, 门将: {Goalkeepers.Count} 个");
         }
         catch (Exception ex)
@@ -206,7 +206,10 @@ public class MainViewModel : ViewModelBase
             var pipelineVm = App.Services.GetService(typeof(PipelineViewModel)) as PipelineViewModel;
             pipelineVm?.SyncSampleItems();
         }
-        catch { }
+        catch (Exception ex)
+        {
+            AddLog("warn", $"样本列表同步失败: {ex.Message}");
+        }
 
         AddLog("info", "═══════ 自检完成 ═══════");
     }
@@ -232,21 +235,25 @@ public class MainViewModel : ViewModelBase
         AddLog("info", $"GPU: {StatusBarText}");
         AddLog("info", $"标定: {(CalibrationStatus?.FullyReady == true ? "✓ 就绪" : "⚠ 待标定")}");
 
-        RefreshLists();
+        await RefreshListsAsync();
     }
 
-    public void RefreshLists()
+    public async Task RefreshListsAsync()
     {
+        var samples = await Task.Run(() => _pipelineService.ScanSamples());
+        var goalkeepers = await Task.Run(() => _pipelineService.ScanGoalkeepers());
+        var calib = await Task.Run(() => _pipelineService.GetCalibrationStatus());
+
         Samples.Clear();
-        foreach (var s in _pipelineService.ScanSamples())
+        foreach (var s in samples)
             Samples.Add(s);
         SampleCount = Samples.Count;
 
         Goalkeepers.Clear();
-        foreach (var gk in _pipelineService.ScanGoalkeepers())
+        foreach (var gk in goalkeepers)
             Goalkeepers.Add(gk);
 
-        CalibrationStatus = _pipelineService.GetCalibrationStatus();
+        CalibrationStatus = calib;
     }
 
     /// <summary>视频内参标定：左右各用一段棋盘格视频</summary>
@@ -268,7 +275,7 @@ public class MainViewModel : ViewModelBase
             CalibrationProgress = ok ? 100 : CalibrationProgress;
             CalibrationProgressText = ok ? "内参标定完成" : "内参标定失败，详情已写入日志文件";
             AddLog(ok ? "success" : "error", ok ? "内参标定完成" : "内参标定失败");
-            RefreshLists();
+            await RefreshListsAsync();
             return ok;
         }
         finally { IsCalibrationRunning = false; }
@@ -293,15 +300,15 @@ public class MainViewModel : ViewModelBase
             CalibrationProgress = ok ? 100 : CalibrationProgress;
             CalibrationProgressText = ok ? "外参标定完成" : "外参标定失败，详情已写入日志文件";
             AddLog(ok ? "success" : "error", ok ? "外参标定完成" : "外参标定失败");
-            RefreshLists();
+            await RefreshListsAsync();
             return ok;
         }
         finally { IsCalibrationRunning = false; }
     }
 
-    private void OnRefresh()
+    private async Task OnRefreshAsync()
     {
-        RefreshLists();
+        await RefreshListsAsync();
         AddLog("info", "列表已刷新");
     }
 

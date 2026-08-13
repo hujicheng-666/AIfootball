@@ -5,6 +5,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using AIfootball.App.Services;
 using AIfootball.App.Services.Interfaces;
+using AIfootball.App.Models;
 using AIfootball.App.ViewModels;
 
 namespace AIfootball.App.Views.Pages;
@@ -59,6 +60,14 @@ public partial class ResultsPage : UserControl
         }
 
         var engine = App.Services.GetService(typeof(IPythonEngine)) as IPythonEngine;
+
+        // 清空上一次会话遗留的命令文件，避免 Unity 启动时执行旧 replay 命令导致自动播放
+        try
+        {
+            await UnityCommandClient.SendAsync(engine?.WorkspaceDir ?? ".", "");
+        }
+        catch { }
+
         var dataDirectory = Path.Combine(engine?.WorkspaceDir ?? ".", "data");
         var sample = Directory.Exists(dataDirectory)
             ? Directory.GetFiles(dataDirectory, "*_trajectory.csv")
@@ -148,8 +157,71 @@ public partial class ResultsPage : UserControl
     private async void Replay_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("replay");
     private async void Reset_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("reset");
     private async void View_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("view");
-    private async void PreviousGoalkeeper_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("goalkeeper:previous");
-    private async void NextGoalkeeper_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("goalkeeper:next");
+    private sealed record GoalkeeperChoice(string Key, string Label);
+
+    private void SelectGoalkeeper_Click(object sender, RoutedEventArgs e)
+    {
+        var pipeline = App.Services.GetService(typeof(IPipelineService)) as IPipelineService;
+        var gkList = pipeline?.ScanGoalkeepers() ?? new List<GoalkeeperInfo>();
+        var choices = gkList.Select(gk =>
+        {
+            var stats = pipeline?.LoadGoalkeeperStats(gk.Name);
+            string label = string.IsNullOrWhiteSpace(stats?.DisplayName) ? gk.Name : stats.DisplayName;
+            return new GoalkeeperChoice(gk.Name, label);
+        }).ToList();
+        GoalkeeperList.ItemsSource = choices;
+        GoalkeeperPopup.IsOpen = true;
+    }
+
+    private void GoalkeeperItem_MouseEnter(object sender, System.Windows.Input.MouseEventArgs e)
+    {
+        if (sender is ListBoxItem { DataContext: GoalkeeperChoice choice })
+            ShowGoalkeeperPreview(choice.Key);
+    }
+
+    private async void GoalkeeperItem_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is ListBoxItem { DataContext: GoalkeeperChoice choice })
+        {
+            GoalkeeperPopup.IsOpen = false;
+            await SendUnityCommandAsync($"goalkeeper:{choice.Key}");
+        }
+    }
+
+    private void ShowGoalkeeperPreview(string key)
+    {
+        var pipeline = App.Services.GetService(typeof(IPipelineService)) as IPipelineService;
+        var stats = pipeline?.LoadGoalkeeperStats(key);
+        if (stats is null)
+        {
+            PreviewName.Text = key;
+            PreviewDesc.Text = "";
+            PreviewAttrs.Text = "无法加载该门将的属性";
+            PreviewRadar.Values = null;
+            return;
+        }
+
+        PreviewName.Text = stats.DisplayName;
+        PreviewDesc.Text = stats.Description;
+        PreviewAttrs.Text =
+            $"速度: {stats.DiveSpeed:0.##}\n" +
+            $"臂展: {stats.Reach:0.##}\n" +
+            $"弹跳: {stats.JumpHeight:0.##}\n" +
+            $"反应: {stats.GoalKeeping:0.##}\n" +
+            $"身高: {stats.Height:0.##}\n" +
+            $"站位距离: {stats.TendGoalDistance:0.##}\n" +
+            $"站位速度: {stats.TendGoalSpeed:0.##}";
+        PreviewRadar.Values = new[]
+        {
+            Normalize(stats.DiveSpeed, 2f, 6f),
+            Normalize(stats.Reach, 0.3f, 0.7f),
+            Normalize(stats.JumpHeight, 0.3f, 0.8f),
+            Normalize(stats.GoalKeeping, 0.5f, 0.95f),
+            Normalize(stats.Height, 1.7f, 2.1f),
+        };
+    }
+
+    static double Normalize(float value, float min, float max) => Math.Clamp((value - min) / (max - min), 0f, 1f);
     private async void Speed_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { Tag: string speed })

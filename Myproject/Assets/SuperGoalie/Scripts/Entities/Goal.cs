@@ -14,6 +14,12 @@ namespace Assets.SuperGoalie.Scripts.Entities
         [SerializeField]
         GoalTrigger _goalTrigger;
 
+        [SerializeField]
+        bool _proceduralFrameVisual = true;
+
+        [SerializeField]
+        float _goalDepth = 2.1f;
+
         public bool HasCompleteGoalMouth
         {
             get
@@ -32,6 +38,9 @@ namespace Assets.SuperGoalie.Scripts.Entities
 
             // 自动给球门所有子物体加碰撞体，防止球穿模
             EnsureGoalColliders();
+
+            // 修正门框视觉：原始 FBX 中门后两根支撑柱建模错位
+            EnsureVisualFrame();
         }
 
         /// <summary>
@@ -60,7 +69,7 @@ namespace Assets.SuperGoalie.Scripts.Entities
             Quaternion goalRotation = Quaternion.LookRotation(pitchForward, up);
             float width = Vector3.Distance(_goalMouth._pointBottomLeft.position, _goalMouth._pointBottomRight.position);
             float height = Vector3.Distance(_goalMouth._pointBottomLeft.position, _goalMouth._pointTopLeft.position);
-            float depth = 1.15f;
+            float depth = _goalDepth;
             float postThickness = 0.12f;
 
             Vector3 leftPost = _goalMouth._pointBottomLeft.position;
@@ -74,6 +83,92 @@ namespace Assets.SuperGoalie.Scripts.Entities
             CreateBox(root, "PenaltyPhysics_LeftSideNet", leftPost - pitchForward * (depth * 0.5f) + up * (height * 0.5f), goalRotation, new Vector3(0.10f, height + 0.25f, depth), material);
             CreateBox(root, "PenaltyPhysics_RightSideNet", rightPost - pitchForward * (depth * 0.5f) + up * (height * 0.5f), goalRotation, new Vector3(0.10f, height + 0.25f, depth), material);
             CreateBox(root, "PenaltyPhysics_TopNet", origin - pitchForward * (depth * 0.5f) + up * (height + 0.05f), goalRotation, new Vector3(width + 0.4f, 0.10f, depth), material);
+        }
+
+        /// <summary>
+        /// 修正门框视觉：原始 FBX 中门后两根支撑柱建模错位，落在底部四边形之外、
+        /// 未与网兜组成立方体。这里用程序化立方体重建一个正确的门框，并隐藏损坏的
+        /// WoodWork 网格（Net 网保留）。后支撑柱正好落在底部四边形的后角。
+        /// </summary>
+        void EnsureVisualFrame()
+        {
+            if (!_proceduralFrameVisual)
+                return;
+
+            if (!HasCompleteGoalMouth)
+                return;
+
+            Transform root = transform.Find("GoalFrameVisual");
+            if (root != null && root.childCount > 0)
+                return;
+
+            // 隐藏损坏的 WoodWork 网格（含错位的后支撑柱），保留 Net（网）
+            Material woodMaterial = null;
+            foreach (var renderer in GetComponentsInChildren<MeshRenderer>(true))
+            {
+                if (renderer.name == "WoodWork")
+                {
+                    if (renderer.sharedMaterial != null)
+                        woodMaterial = renderer.sharedMaterial;
+                    renderer.enabled = false;
+                }
+            }
+
+            if (root == null)
+            {
+                GameObject rootObject = new GameObject("GoalFrameVisual");
+                rootObject.transform.SetParent(transform, false);
+                root = rootObject.transform;
+            }
+
+            Vector3 origin = CsvCoordinateOrigin;
+            Vector3 up = Vector3.up;
+            Vector3 pitchForward = PitchForward;
+            Quaternion goalRotation = Quaternion.LookRotation(pitchForward, up);
+            Vector3 leftPost = _goalMouth._pointBottomLeft.position;
+            Vector3 rightPost = _goalMouth._pointBottomRight.position;
+            float width = Vector3.Distance(leftPost, rightPost);
+            float height = Vector3.Distance(_goalMouth._pointBottomLeft.position, _goalMouth._pointTopLeft.position);
+            float depth = _goalDepth;
+            float t = 0.12f;  // 柱/横杆粗细
+
+            // 四根立柱（前左右 + 后左右），后立柱正好落在底部四边形的后角
+            CreateVisualBox(root, "FrontLeftPost", leftPost + up * (height * 0.5f), goalRotation, new Vector3(t, height + t, t), woodMaterial);
+            CreateVisualBox(root, "FrontRightPost", rightPost + up * (height * 0.5f), goalRotation, new Vector3(t, height + t, t), woodMaterial);
+            CreateVisualBox(root, "BackLeftPost", leftPost - pitchForward * depth + up * (height * 0.5f), goalRotation, new Vector3(t, height + t, t), woodMaterial);
+            CreateVisualBox(root, "BackRightPost", rightPost - pitchForward * depth + up * (height * 0.5f), goalRotation, new Vector3(t, height + t, t), woodMaterial);
+
+            // 顶部：横梁 + 后横梁 + 两条顶侧梁
+            CreateVisualBox(root, "Crossbar", origin + up * height, goalRotation, new Vector3(width + t, t, t), woodMaterial);
+            CreateVisualBox(root, "BackTopBar", origin - pitchForward * depth + up * height, goalRotation, new Vector3(width + t, t, t), woodMaterial);
+            CreateVisualBox(root, "LeftTopSideBar", leftPost - pitchForward * (depth * 0.5f) + up * height, goalRotation, new Vector3(t, t, depth + t), woodMaterial);
+            CreateVisualBox(root, "RightTopSideBar", rightPost - pitchForward * (depth * 0.5f) + up * height, goalRotation, new Vector3(t, t, depth + t), woodMaterial);
+
+            // 底部四边形：前横杆 + 后横杆 + 两条底侧梁（组成一个完整的矩形底座）
+            CreateVisualBox(root, "BottomFrontBar", origin, goalRotation, new Vector3(width + t, t, t), woodMaterial);
+            CreateVisualBox(root, "BottomBackBar", origin - pitchForward * depth, goalRotation, new Vector3(width + t, t, t), woodMaterial);
+            CreateVisualBox(root, "BottomLeftSideBar", leftPost - pitchForward * (depth * 0.5f), goalRotation, new Vector3(t, t, depth + t), woodMaterial);
+            CreateVisualBox(root, "BottomRightSideBar", rightPost - pitchForward * (depth * 0.5f), goalRotation, new Vector3(t, t, depth + t), woodMaterial);
+        }
+
+        static GameObject CreateVisualBox(Transform parent, string name, Vector3 worldPosition, Quaternion worldRotation, Vector3 size, Material material)
+        {
+            GameObject obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            obj.name = name;
+            obj.transform.SetParent(parent, true);
+            obj.transform.position = worldPosition;
+            obj.transform.rotation = worldRotation;
+            obj.transform.localScale = size;
+
+            // 视觉专用：移除原始碰撞体，物理碰撞由 EnsureGoalColliders 统一负责
+            Collider col = obj.GetComponent<Collider>();
+            if (col != null)
+                Destroy(col);
+
+            Renderer r = obj.GetComponent<Renderer>();
+            if (r != null && material != null)
+                r.sharedMaterial = material;
+            return obj;
         }
 
         static PhysicMaterial CreateGoalPhysicsMaterial()

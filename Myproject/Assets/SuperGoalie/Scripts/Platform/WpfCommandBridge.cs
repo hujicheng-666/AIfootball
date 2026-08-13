@@ -103,6 +103,14 @@ namespace Assets.SuperGoalie.Scripts.Platform
             _views = BuildViews();
             // 初始视角：罚球点视角（罚球点上方看球门）
             _activeView = 0;
+
+            // 启动时不执行上一次会话遗留的旧命令（如 replay 会导致首次打开自动播放）
+            try
+            {
+                if (!string.IsNullOrEmpty(_commandFile) && File.Exists(_commandFile))
+                    _lastContent = File.ReadAllText(_commandFile).Trim();
+            }
+            catch { }
         }
 
         CameraView[] BuildViews()
@@ -202,7 +210,15 @@ namespace Assets.SuperGoalie.Scripts.Platform
                     if (_gameManager != null) _gameManager.NextGoalkeeper();
                     break;
                 default:
-                    if (command.StartsWith("speed:", StringComparison.Ordinal))
+                    if (command.StartsWith("goalkeeper:", StringComparison.Ordinal))
+                    {
+                        string gkName = command.Substring("goalkeeper:".Length).Trim();
+                        if (_gameManager != null && _gameManager.SwitchGoalkeeper(gkName))
+                            Debug.Log("[WpfCommandBridge] 门将: " + gkName);
+                        else
+                            Debug.LogWarning("[WpfCommandBridge] 门将切换失败: " + gkName);
+                    }
+                    else if (command.StartsWith("speed:", StringComparison.Ordinal))
                     {
                         float speed;
                         if (float.TryParse(command.Substring(6), out speed) && _gameManager != null)
