@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using AIfootball.App.ViewModels;
@@ -9,11 +10,89 @@ namespace AIfootball.App.Views.Pages;
 public partial class CalibrationPage : UserControl
 {
     private MainViewModel? _vm;
+    private bool _showCalibrationWorkflow;
 
     public CalibrationPage()
     {
         InitializeComponent();
-        Loaded += (_, _) => _vm = DataContext as MainViewModel;
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
+        IsVisibleChanged += OnIsVisibleChanged;
+        DataContextChanged += OnDataContextChanged;
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        AttachViewModel();
+        _showCalibrationWorkflow = false;
+        UpdateCalibrationView();
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (_vm is not null)
+            _vm.PropertyChanged -= OnViewModelPropertyChanged;
+
+        _vm = null;
+    }
+
+    private void OnIsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        if (e.NewValue is true)
+        {
+            AttachViewModel();
+            _showCalibrationWorkflow = false;
+            UpdateCalibrationView();
+        }
+    }
+
+    private void OnDataContextChanged(object sender, DependencyPropertyChangedEventArgs e)
+    {
+        AttachViewModel();
+        _showCalibrationWorkflow = false;
+        UpdateCalibrationView();
+    }
+
+    private void AttachViewModel()
+    {
+        var next = DataContext as MainViewModel;
+        if (ReferenceEquals(_vm, next))
+            return;
+
+        if (_vm is not null)
+            _vm.PropertyChanged -= OnViewModelPropertyChanged;
+
+        _vm = next;
+        if (_vm is not null)
+            _vm.PropertyChanged += OnViewModelPropertyChanged;
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MainViewModel.CalibrationStatus) or nameof(MainViewModel.IsCalibrationRunning))
+            Dispatcher.InvokeAsync(UpdateCalibrationView);
+    }
+
+    private void Recalibrate_Click(object sender, RoutedEventArgs e)
+    {
+        _showCalibrationWorkflow = true;
+        UpdateCalibrationView();
+    }
+
+    private void UpdateCalibrationView()
+    {
+        var calibrationReady = _vm?.CalibrationStatus?.FullyReady == true;
+        var showWorkflow = !calibrationReady || _showCalibrationWorkflow;
+
+        ExistingCalibrationPanel.Visibility = calibrationReady && !_showCalibrationWorkflow
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        CalibrationProgressPanel.Visibility = showWorkflow && _vm?.IsCalibrationRunning == true
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        IntrinsicsCalibrationPanel.Visibility = showWorkflow ? Visibility.Visible : Visibility.Collapsed;
+        ExtrinsicsCalibrationPanel.Visibility = showWorkflow ? Visibility.Visible : Visibility.Collapsed;
+        CalibrationArtifactsPanel.Visibility = showWorkflow ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ── 目录/文件选择 ──

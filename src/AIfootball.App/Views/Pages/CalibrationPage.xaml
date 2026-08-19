@@ -37,12 +37,25 @@
                        Margin="0,0,0,24"/>
 
             <!-- 标定任务进度：仅在标定页显示 -->
-            <Border Grid.Row="2" Grid.ColumnSpan="3" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource PrimaryBrush}" BorderThickness="1" Padding="16,12" Margin="0,0,0,12" Visibility="{Binding IsCalibrationRunning, Converter={StaticResource BoolToVis}}">
+            <Border x:Name="CalibrationProgressPanel" Grid.Row="2" Grid.ColumnSpan="3" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource PrimaryBrush}" BorderThickness="1" Padding="16,12" Margin="0,0,0,12" Visibility="{Binding IsCalibrationRunning, Converter={StaticResource BoolToVis}}">
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="标定任务正在执行" FontSize="12" FontWeight="SemiBold"/><TextBlock Text="{Binding CalibrationProgressText}" Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,8" TextTrimming="CharacterEllipsis"/><ProgressBar Height="6" Maximum="100" Value="{Binding CalibrationProgress}"/></StackPanel><TextBlock Grid.Column="1" Text="{Binding CalibrationProgress, StringFormat={}{0}%}" Foreground="{StaticResource PrimaryBrush}" FontWeight="SemiBold" VerticalAlignment="Center" Margin="18,0,0,0"/></Grid>
             </Border>
 
+            <!-- 已有完整标定时的入口页 -->
+            <Border x:Name="ExistingCalibrationPanel" Grid.Row="2" Grid.ColumnSpan="3" Style="{StaticResource Card}" Visibility="Collapsed">
+                <Grid>
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <TextBlock Text="当前双目标定已可用" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}"/>
+                        <TextBlock Text="左右相机的内参和外参文件均已就绪，当前结果可直接用于三维重建。" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,8,0,0"/>
+                        <TextBlock Text="如相机位置、焦距或镜头参数发生变化，请重新标定。" FontSize="11" Foreground="{StaticResource TextMutedBrush}" Margin="0,5,0,0"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="重新标定" Style="{StaticResource PrimaryButton}" Padding="18,9" Margin="24,0,0,0" VerticalAlignment="Center" Click="Recalibrate_Click"/>
+                </Grid>
+            </Border>
+
             <!-- 内参标定卡片 -->
-            <Border Grid.Row="3" Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,0,12">
+            <Border x:Name="IntrinsicsCalibrationPanel" Grid.Row="3" Grid.Column="0" Style="{StaticResource Card}" Margin="0,0,0,12">
                 <StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -107,7 +120,7 @@
             </Border>
 
             <!-- 外参标定卡片 -->
-            <Border Grid.Row="4" Grid.Column="0" Style="{StaticResource Card}" Margin="0">
+            <Border x:Name="ExtrinsicsCalibrationPanel" Grid.Row="4" Grid.Column="0" Style="{StaticResource Card}" Margin="0">
                 <StackPanel>
                     <TextBlock Text="02  外参标定" FontSize="16" FontWeight="SemiBold"/>
                     <TextBlock Text="用左右各一张足球场照片计算两相机相对位姿（点击参考点）"
@@ -163,7 +176,7 @@
             </Border>
 
             <!-- 标定文件状态 -->
-            <Border Grid.Row="3" Grid.Column="2" Grid.RowSpan="2" Style="{StaticResource Card}">
+            <Border x:Name="CalibrationArtifactsPanel" Grid.Row="3" Grid.Column="2" Grid.RowSpan="2" Style="{StaticResource Card}">
                 <StackPanel>
                     <TextBlock Text="标定产物" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,12"/>
                     <TextBlock Text="标定结果保存在 calib/ 目录下，供3D重建使用。"

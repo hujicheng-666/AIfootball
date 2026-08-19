@@ -134,8 +134,10 @@ class DualCameraRecorder:
         for i, name in enumerate(["left", "right"]):
             frame = self._frame_buffers[i][-1] if len(self._frame_buffers[i]) else None
             h, w = frame.shape[:2] if frame is not None else (1080, 1920)
+            camera_dir = self.output_dir / name
+            camera_dir.mkdir(parents=True, exist_ok=True)
             self._writers[i] = cv2.VideoWriter(
-                str(self.output_dir / f"VID_{name}.mp4"), fourcc, self._fps[i], (w, h))
+                str(camera_dir / "recording.mp4"), fourcc, self._fps[i], (w, h))
         print("\n录制中... Q 停止")
         self._recording = True; self._start_time = time.time()
         while self._recording:

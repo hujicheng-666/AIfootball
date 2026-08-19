@@ -6,6 +6,7 @@ using Assets.SuperGoalie.Scripts.Data;
 using Assets.SuperGoalie.Scripts.Entities;
 using Assets.SuperGoalie.Scripts.Trajectories;
 using PenaltyKickPlatform.CameraControl;
+using PenaltyKickPlatform.Analysis;
 using PenaltyKickPlatform.Coordinate;
 using PenaltyKickPlatform.History;
 using PenaltyKickPlatform.Platform;
@@ -297,6 +298,25 @@ namespace PenaltyKickPlatform
             _ui.SetPlaybackSpeed(speed);
             if (_trajectoryPlaying && _trajectory != null) RestartPlayback();
             else SetStatus("\u500d\u901f\uff1a" + speed.ToString("0.##") + "x");
+        }
+
+        public ShooterProfile GenerateShooterProfile()
+        {
+            if (_history == null || _history.Entries.Count == 0)
+            {
+                SetStatus("请先导入至少一条训练轨迹 CSV。");
+                return null;
+            }
+
+            ShooterProfile profile = ShooterProfileAnalyzer.Build(_history, _coordinates);
+            if (profile.ValidTrajectoryCount == 0)
+            {
+                SetStatus("没有可用于生成画像的有效训练轨迹。");
+                return null;
+            }
+
+            SetStatus("已根据 " + profile.ValidTrajectoryCount + " 条训练轨迹生成人物特点。");
+            return profile;
         }
 
         public void ResetAll()

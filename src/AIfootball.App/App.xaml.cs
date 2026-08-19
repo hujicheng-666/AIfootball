@@ -30,6 +30,7 @@ public partial class App : Application
         services.AddSingleton<IEnvironmentService>(_ =>
             new EnvironmentService(baseDir));
         services.AddSingleton<IPipelineService, PipelineService>();
+        services.AddSingleton<IShooterProfileService, ShooterProfileService>();
 
         // ViewModels
         services.AddSingleton<MainViewModel>();

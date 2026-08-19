@@ -34,17 +34,7 @@ OUTPUT_ROOT = WORKSPACE_DIR / "output" / "trajectory_3d"
 DEFAULT_YOLO_MODEL = "yolo11m.pt"
 YOLO_MODEL_PATH = Path(os.environ.get("YOLO_MODEL_PATH", WORKSPACE_DIR / "models" / DEFAULT_YOLO_MODEL))
 WORLD_Z_LIMITS = (-1.0, 8.0)
-# 相机分配硬编码（射手视角定义：左相机=射门视角左侧、右相机=射门视角右侧）
-# 2026-08-08 修正：此前整表左右颠倒（旧守门员视角定义遗留），导致 VID_011..016
-# 被反着分配到左右相机。签名匹配验证：VID_011/012/013 -> left，VID_014/015/016 -> right。
-PREFERRED_VIDEO_CAMERA_BY_STEM = {
-    "VID_011": "left",
-    "VID_012": "left",
-    "VID_013": "left",
-    "VID_014": "right",
-    "VID_015": "right",
-    "VID_016": "right",
-}
+# 相机语义由样本目录决定：left/ 中的视频对应 left 标定，right/ 对应 right 标定。
 DEFAULT_IMGSZ = 1280
 DEFAULT_CONF = 0.15
 
@@ -54,14 +44,12 @@ class CameraConfig:
     name: str
     pose_path: Path
     meta_path: Path
-    reference_image_path: Path
     camera_matrix: np.ndarray
     dist_coeffs: np.ndarray
     rvec: np.ndarray
     tvec: np.ndarray
     rotation_matrix: np.ndarray
     camera_center_world: np.ndarray
-    reference_signature: np.ndarray
 
 
 @dataclass
@@ -100,56 +88,6 @@ class Trajectory3D:
     offset_seconds: float
 
 
-def build_signature_from_frame(frame):
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    small = cv2.resize(gray, (320, 140), interpolation=cv2.INTER_AREA)
-    return cv2.GaussianBlur(small, (7, 7), 0)
-
-
-def build_signature_from_image(image_path):
-    image = cv2.imread(str(image_path))
-    if image is None:
-        raise FileNotFoundError(f"无法读取参考图像: {image_path}")
-    return build_signature_from_frame(image)
-
-
-def read_first_frame(video_path):
-    cap = cv2.VideoCapture(str(video_path))
-    ok, frame = cap.read()
-    cap.release()
-    if not ok or frame is None:
-        raise RuntimeError(f"无法读取视频首帧: {video_path}")
-    return frame
-
-
-def _resolve_reference_image(json_image_path):
-    """解析参考图像路径，支持 exe 内打包和外部文件"""
-    p = Path(json_image_path)
-    if p.exists():
-        return p
-
-    # 只取文件名，在多个位置查找
-    filename = p.name
-    candidates = []
-
-    # exe 打包内部路径
-    if getattr(sys, 'frozen', False):
-        candidates.append(Path(sys._MEIPASS) / 'project' / filename)
-
-    # 脚本随 runtime/project 发布时，参考图也与脚本位于同一目录。
-    # 优先在这里找，避免旧标定 JSON 中的绝对路径和工作区布局变化影响重建。
-    candidates.append(Path(__file__).resolve().parent / filename)
-
-    # 工作目录下的 project/
-    candidates.append(WORKSPACE_DIR / 'project' / filename)
-
-    for c in candidates:
-        if c.exists():
-            return c
-
-    raise FileNotFoundError(f"找不到参考图像: {filename} (JSON 中记录: {json_image_path})")
-
-
 def load_camera_configs():
     configs = []
     for name in ("left", "right"):
@@ -158,9 +96,6 @@ def load_camera_configs():
         if not pose_path.exists() or not meta_path.exists():
             raise FileNotFoundError(f"缺少相机参数文件: {pose_path} 或 {meta_path}")
 
-        with open(meta_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-
         pose = np.load(pose_path)
         camera_matrix = np.asarray(pose["camera_matrix"], dtype=np.float64)
         dist_coeffs = np.asarray(pose["dist_coeffs"], dtype=np.float64)
@@ -168,58 +103,34 @@ def load_camera_configs():
         tvec = np.asarray(pose["tvec"], dtype=np.float64).reshape(3, 1)
         rotation_matrix = np.asarray(pose["R"], dtype=np.float64)
         camera_center_world = -rotation_matrix.T @ tvec.reshape(3)
-        reference_image_path = _resolve_reference_image(meta["image_path"])
-
         configs.append(
             CameraConfig(
                 name=name,
                 pose_path=pose_path,
                 meta_path=meta_path,
-                reference_image_path=reference_image_path,
                 camera_matrix=camera_matrix,
                 dist_coeffs=dist_coeffs,
                 rvec=rvec,
                 tvec=tvec,
                 rotation_matrix=rotation_matrix,
                 camera_center_world=camera_center_world,
-                reference_signature=build_signature_from_image(reference_image_path),
             )
         )
     return configs
 
 
-def assign_videos_to_cameras(video_paths, configs):
-    if len(video_paths) != len(configs):
-        raise ValueError(
-            f"视频数量 ({len(video_paths)}) 与相机数量 ({len(configs)}) 不匹配，"
-            "无法进行相机分配。"
-        )
-
-    config_by_name = {config.name: config for config in configs}
-    preferred_assignment = {}
-    for video_path in video_paths:
-        preferred_camera = PREFERRED_VIDEO_CAMERA_BY_STEM.get(video_path.stem)
-        if preferred_camera is None or preferred_camera not in config_by_name:
-            preferred_assignment = None
-            break
-        preferred_assignment[video_path] = config_by_name[preferred_camera]
-
-    if preferred_assignment is not None and len({cfg.name for cfg in preferred_assignment.values()}) == len(video_paths):
-        return preferred_assignment
-
-    video_signatures = [build_signature_from_frame(read_first_frame(video)) for video in video_paths]
-    distances = np.zeros((len(video_paths), len(configs)), dtype=np.float64)
-    for i, signature in enumerate(video_signatures):
-        for j, config in enumerate(configs):
-            distances[i, j] = float(
-                np.mean(np.abs(signature.astype(np.float32) - config.reference_signature.astype(np.float32)))
+def resolve_camera_videos(sample_dir):
+    """Read camera identity only from the sample's left/right folders."""
+    videos = {}
+    for camera_name in ("left", "right"):
+        camera_dir = sample_dir / camera_name
+        camera_videos = sorted(path for path in camera_dir.glob("*.mp4") if path.is_file())
+        if len(camera_videos) != 1:
+            raise RuntimeError(
+                f"{camera_dir} must contain exactly one MP4 video; found {len(camera_videos)}."
             )
-
-    assignment_a = {video_paths[0]: configs[0], video_paths[1]: configs[1]}
-    cost_a = distances[0, 0] + distances[1, 1]
-    assignment_b = {video_paths[0]: configs[1], video_paths[1]: configs[0]}
-    cost_b = distances[0, 1] + distances[1, 0]
-    return assignment_a if cost_a <= cost_b else assignment_b
+        videos[camera_name] = camera_videos[0]
+    return videos
 
 
 def project_world_points(world_points, config):
@@ -1239,20 +1150,24 @@ def _cuda_available():
 
 
 def process_sample(sample_dir, camera_configs, model, imgsz, conf, model_path=None):
-    video_paths = sorted(sample_dir.glob("*.mp4"))
+    videos_by_camera = resolve_camera_videos(sample_dir)
+    video_paths = list(videos_by_camera.values())
     if len(video_paths) != 2:
         raise RuntimeError(f"{sample_dir} 下应当正好有 2 个视频，当前为 {len(video_paths)} 个。")
 
     output_dir = OUTPUT_ROOT / sample_dir.name
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    assignment = assign_videos_to_cameras(video_paths, camera_configs)
+    configs_by_name = {config.name: config for config in camera_configs}
+    if set(configs_by_name) != {"left", "right"}:
+        raise RuntimeError("Camera calibration must define both left and right cameras.")
+    camera_videos = [(camera_name, videos_by_camera[camera_name]) for camera_name in ("left", "right")]
     print(f"\n[{sample_dir.name}] 相机分配结果:")
-    for video_path, config in assignment.items():
-        print(f"  {video_path.name} -> {config.name} ({config.reference_image_path.name})")
+    for camera_name, video_path in camera_videos:
+        print(f"  {video_path} -> {camera_name}")
 
-    def _detect_one(video_path, m):
-        config = assignment[video_path]
+    def _detect_one(camera_name, video_path, m):
+        config = configs_by_name[camera_name]
         print(f"[{sample_dir.name}] 检测足球并提取 2D 轨迹: {video_path.name}", flush=True)
         track = detect_video_track(video_path, config, m, imgsz=imgsz, conf=conf)
         print(f"  kick_frame={track.kick_frame}, detected_points={len(track.image_points)}", flush=True)
@@ -1264,13 +1179,14 @@ def process_sample(sample_dir, camera_configs, model, imgsz, conf, model_path=No
     if model_path is not None and _cuda_available():
         with ThreadPoolExecutor(max_workers=2) as ex:
             models = [model, YOLO(model_path)]
-            futures = [ex.submit(_detect_one, vp, m) for vp, m in zip(video_paths, models)]
+            futures = [ex.submit(_detect_one, camera_name, video_path, m)
+                       for (camera_name, video_path), m in zip(camera_videos, models)]
             tracks = [f.result() for f in futures]
     else:
-        tracks = [_detect_one(vp, model) for vp in video_paths]
+        tracks = [_detect_one(camera_name, video_path, model)
+                  for camera_name, video_path in camera_videos]
 
     tracks_by_name = {track.camera_name: track for track in tracks}
-    configs_by_name = {config.name: config for config in camera_configs}
     if "left" not in tracks_by_name or "right" not in tracks_by_name:
         raise RuntimeError("当前样例未能匹配到 left/right 两个相机视角。")
 

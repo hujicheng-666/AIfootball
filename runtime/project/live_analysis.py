@@ -7,7 +7,7 @@
 - 实时在预览窗口叠加：检测框、置信度、实时 3D 轨迹点（需标定）。
 - 停止后直接用录制过程中已累积的两路 2D 检测结果重建 3D 轨迹 +
   弹道拟合 + Unity 导出，不需要重跑整段视频检测（秒出结果）。
-- 录制文件仍落盘（VID_left.mp4 / VID_right.mp4），可随时重跑离线流程。
+- 录制文件分别落盘到 left/recording.mp4、right/recording.mp4，可随时重跑离线流程。
 
 用法（由 __main__.py online-live 子命令调用）:
   python live_analysis.py --cam-left <L> --cam-right <R> --sample <name>
@@ -182,7 +182,7 @@ def finish_reconstruction(sample_name, sample_dir, tracker_l, tracker_r,
 
     def make_track(tracker, cam_name, kick_frame):
         times, points, confs = tracker.track_after_kick(kick_frame)
-        video_path = sample_dir / (f"VID_{cam_name}.mp4" if saved_ok else f"live_{cam_name}.mp4")
+        video_path = (sample_dir / cam_name / "recording.mp4") if saved_ok else sample_dir / f"live_{cam_name}.mp4"
         return VideoTrack(
             video_path=video_path,
             camera_name=cam_name,
@@ -337,8 +337,12 @@ def run(cam_left="0", cam_right="1", sample_name="sample_live",
         hl = int(cap_l.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
         wr = int(cap_r.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1920
         hr = int(cap_r.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 1080
-        writers[0] = cv2.VideoWriter(str(sample_dir / "VID_left.mp4"), fourcc, fps_l, (wl, hl))
-        writers[1] = cv2.VideoWriter(str(sample_dir / "VID_right.mp4"), fourcc, fps_r, (wr, hr))
+        left_dir = sample_dir / "left"
+        right_dir = sample_dir / "right"
+        left_dir.mkdir(parents=True, exist_ok=True)
+        right_dir.mkdir(parents=True, exist_ok=True)
+        writers[0] = cv2.VideoWriter(str(left_dir / "recording.mp4"), fourcc, fps_l, (wl, hl))
+        writers[1] = cv2.VideoWriter(str(right_dir / "recording.mp4"), fourcc, fps_r, (wr, hr))
 
     t0 = time.time()
     world_buf = deque(maxlen=400)
@@ -412,7 +416,7 @@ def run(cam_left="0", cam_right="1", sample_name="sample_live",
     print(f"\n录制结束: {elapsed:.1f}s, 左 {len(tracker_l.times)} 检测点, "
           f"右 {len(tracker_r.times)} 检测点")
     if not no_save:
-        print(f"已保存: {sample_dir / 'VID_left.mp4'} / VID_right.mp4")
+        print(f"已保存: {sample_dir / 'left' / 'recording.mp4'} / {sample_dir / 'right' / 'recording.mp4'}")
 
     tracker_l.fps = fps_l
     tracker_r.fps = fps_r

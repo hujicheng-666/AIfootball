@@ -14,20 +14,15 @@
                 <RowDefinition Height="30"/>
             </Grid.RowDefinitions>
 
-            <Border Grid.Row="0" Background="#33414C" CornerRadius="9,9,0,0" ClipToBounds="True" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
+            <Border Grid.Row="0" Background="{StaticResource ChromeBrush}" CornerRadius="9,9,0,0" ClipToBounds="True" MouseLeftButtonDown="TitleBar_MouseLeftButtonDown">
             <Grid>
-                <Grid.ColumnDefinitions><ColumnDefinition Width="252"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <Border Grid.Column="0" Background="#2C3842" BorderBrush="#52616C" BorderThickness="0,0,1,0" Padding="20,0">
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="22" Height="22" Background="{StaticResource PrimaryBrush}" CornerRadius="5" Margin="0,0,10,0">
-                            <TextBlock Text="A" Foreground="#10201A" FontWeight="Bold" FontSize="13" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <TextBlock Text="AIFOOTBALL" Foreground="White" FontWeight="Bold" FontSize="13"/>
-                    </StackPanel>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="236"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="{StaticResource ChromeElevatedBrush}" BorderBrush="{StaticResource ChromeBorderBrush}" BorderThickness="0,0,1,0" Padding="18,0">
+                    <Image Source="/Resources/SpotIQMark.png" Width="38" Height="27" Stretch="Uniform" HorizontalAlignment="Left" VerticalAlignment="Center"/>
                 </Border>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="20,0">
-                    <TextBlock Text="MATCH ANALYSIS DESK" Foreground="#B8C3CC" FontSize="10" FontWeight="SemiBold"/>
-                    <Border Width="1" Height="14" Background="#52606B" Margin="12,0"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0">
+                    <TextBlock Text="MATCH ANALYSIS DESK" Foreground="{StaticResource ChromeMutedBrush}" FontSize="10" FontWeight="SemiBold"/>
+                    <Border Width="1" Height="14" Background="{StaticResource ChromeBorderBrush}" Margin="12,0"/>
                     <TextBlock x:Name="TitleBarText" Text="概览" Foreground="#E3EAF0" FontSize="12"/>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal">
@@ -39,8 +34,8 @@
             </Border>
 
             <Grid Grid.Row="1">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="252"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                <Border Grid.Column="0" Background="#F8FAFB" Padding="12,18">
+                <Grid.ColumnDefinitions><ColumnDefinition Width="236"/><ColumnDefinition Width="1"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                <Border Grid.Column="0" Background="{StaticResource SurfaceBrush}" Padding="12,18">
                     <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
                         <StackPanel>
                             <TextBlock Text="工作区" Foreground="{StaticResource TextMutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="12,0,0,8"/>
@@ -66,7 +61,7 @@
                     <pages:ResultsPage x:Name="ResultsPage" Visibility="Collapsed"/>
                 </Grid>
             </Grid>
-            <Border Grid.Row="2" Background="#F8FAFB" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" CornerRadius="0,0,9,9" ClipToBounds="True">
+            <Border Grid.Row="2" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" CornerRadius="0,0,9,9" ClipToBounds="True">
                 <Grid Margin="18,0"><TextBlock x:Name="StatusBarTextBlock" Text="就绪" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" VerticalAlignment="Center"/><TextBlock x:Name="GpuLabel" FontSize="11" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
             </Border>
         </Grid>

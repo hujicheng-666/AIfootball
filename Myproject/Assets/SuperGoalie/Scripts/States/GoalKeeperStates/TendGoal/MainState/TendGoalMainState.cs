@@ -56,25 +56,21 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.TendGoal.MainState
                     //cache the ball position
                     _prevBallPosition = ballPosition;
 
-                    // Cut the shooting angle on the ray from goal centre to ball.
-                    // This mirrors the separation used by modern football games:
-                    // positioning chooses the pose; animation/physics executes it.
+                    // Penalty-kick setup: the keeper may adjust laterally, but must
+                    // remain on the goal line until the ball is kicked (IFAB Law 14).
+                    // Forward interception is calculated only after BallLaunched.
                     Vector3 origin = Owner.Goal.CsvCoordinateOrigin;
-                    Vector3 pitchForward = Owner.Goal.PitchForward;
                     Vector3 pitchRight = Owner.Goal.PitchRight;
                     Vector3 goalSpaceBall = Owner.Goal.WorldToGoalCoordinates(ballPosition);
-                    float targetDepth = Mathf.Clamp(Owner.TendGoalDistance, 0.45f, 3f);
-                    float depth = Mathf.Max(targetDepth, goalSpaceBall.z);
-                    float lateral = goalSpaceBall.x * targetDepth / depth;
+                    float depth = Mathf.Max(0.01f, goalSpaceBall.z);
+                    float lateral = goalSpaceBall.x * 0.20f / depth;
                     float halfWidth = Mathf.Max(0.5f, Owner.Goal.GoalWidth * 0.5f - 0.28f);
                     lateral = Mathf.Clamp(lateral, -halfWidth, halfWidth);
 
                     float error = (1f - Mathf.Clamp01(Owner.GoalKeeping)) * 0.35f;
                     lateral += Random.Range(-error, error);
-                    float depthError = Random.Range(-error * 0.35f, error * 0.35f);
                     _steeringTarget = origin
-                        + pitchRight * Mathf.Clamp(lateral, -halfWidth, halfWidth)
-                        + pitchForward * Mathf.Max(0.35f, targetDepth + depthError);
+                        + pitchRight * Mathf.Clamp(lateral, -halfWidth, halfWidth);
                     _steeringTarget.y = Owner.Position.y;
                 }
 

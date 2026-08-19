@@ -1,5 +1,6 @@
 using System;
 using Assets.SuperGoalie.Scripts.Data;
+using PenaltyKickPlatform.Analysis;
 using PenaltyKickPlatform.History;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -42,6 +43,7 @@ namespace PenaltyKickPlatform.UI
         private Text _viewText;
         private Text _goalkeeperNameText;
         private Text _goalkeeperStatsText;
+        private Text _shooterProfileText;
         private Slider _speedSlider;
         private RawImage _goalkeeperRadarImage;
         private Texture2D _goalkeeperRadarTexture;
@@ -184,6 +186,7 @@ namespace PenaltyKickPlatform.UI
             raycaster.ignoreReversedGraphics = true;
 
             BuildControlPanel(canvasObject.transform);
+            BuildShooterProfilePanel(canvasObject.transform);
             BuildHistoryPanel(canvasObject.transform);
             BuildReplayPanel(canvasObject.transform);
             DisableCompetingCanvases();
@@ -272,6 +275,53 @@ namespace PenaltyKickPlatform.UI
 
             Button next = CreateButton("NextGoalkeeper", panel, "\u4e0b\u4e00\u4f4d", Accent, () => _app.NextGoalkeeper());
             SetRect(next.GetComponent<RectTransform>(), Vector2.zero, Vector2.zero, new Vector2(268f, 24f), new Vector2(348f, 56f));
+        }
+
+        private void BuildShooterProfilePanel(Transform canvas)
+        {
+            RectTransform panel = CreatePanel("ShooterProfilePanel", canvas, Panel);
+            panel.anchorMin = new Vector2(0f, 1f);
+            panel.anchorMax = new Vector2(0f, 1f);
+            panel.pivot = new Vector2(0f, 1f);
+            panel.anchoredPosition = new Vector2(18f, -320f);
+            panel.sizeDelta = new Vector2(388f, 206f);
+            AddChrome(panel.gameObject, 0.10f);
+            AddTopAccent(panel);
+
+            Text title = CreateText("ShooterProfileTitle", panel, "点球手特点", 17, TextAnchor.MiddleLeft);
+            SetRect(title.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(16f, -38f), new Vector2(-16f, -8f));
+            title.fontStyle = FontStyle.Bold;
+
+            Text tip = CreateText("ShooterProfileTip", panel, "仅分析不重复的 CSV 射门轨迹", 11, TextAnchor.MiddleRight);
+            SetRect(tip.rectTransform, new Vector2(0f, 1f), new Vector2(1f, 1f), new Vector2(136f, -37f), new Vector2(-16f, -10f));
+            tip.color = DimText;
+
+            _shooterProfileText = CreateText("ShooterProfileText", panel,
+                "导入训练 CSV 后，点击生成画像。", 12, TextAnchor.UpperLeft);
+            SetRect(_shooterProfileText.rectTransform, Vector2.zero, Vector2.one, new Vector2(16f, 54f), new Vector2(-16f, -48f));
+            _shooterProfileText.color = SoftText;
+            _shooterProfileText.horizontalOverflow = HorizontalWrapMode.Wrap;
+            _shooterProfileText.verticalOverflow = VerticalWrapMode.Truncate;
+
+            Button generate = CreateButton("GenerateShooterProfile", panel, "根据训练数据生成特点", Accent,
+                GenerateShooterProfile);
+            SetRect(generate.GetComponent<RectTransform>(), Vector2.zero, Vector2.zero, new Vector2(16f, 14f), new Vector2(236f, 44f));
+        }
+
+        private void GenerateShooterProfile()
+        {
+            if (_app == null)
+                return;
+
+            ShooterProfile profile = _app.GenerateShooterProfile();
+            if (_shooterProfileText == null)
+                return;
+            if (profile == null)
+            {
+                _shooterProfileText.text = "暂无可分析的训练数据。\n请先导入格式正确的轨迹 CSV。";
+                return;
+            }
+            _shooterProfileText.text = profile.Summary;
         }
 
         private void BuildHistoryPanel(Transform canvas)

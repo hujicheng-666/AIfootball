@@ -17,6 +17,13 @@
     <Color x:Key="TextSecondaryColor">#5A6875</Color>
     <Color x:Key="TextMutedColor">#7B8995</Color>
 
+    <!-- Application chrome: shared by the launch screen and desktop frame. -->
+    <Color x:Key="ChromeColor">#102B37</Color>
+    <Color x:Key="ChromeElevatedColor">#153945</Color>
+    <Color x:Key="ChromeBorderColor">#28505C</Color>
+    <Color x:Key="ChromeTextColor">#EDF8FB</Color>
+    <Color x:Key="ChromeMutedColor">#A4C0C9</Color>
+
     <SolidColorBrush x:Key="PrimaryBrush" Color="{StaticResource PrimaryColor}"/>
     <SolidColorBrush x:Key="PrimaryDarkBrush" Color="{StaticResource PrimaryDarkColor}"/>
     <SolidColorBrush x:Key="PrimaryLightBrush" Color="{StaticResource PrimaryLightColor}"/>
@@ -30,4 +37,9 @@
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}"/>
     <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
+    <SolidColorBrush x:Key="ChromeBrush" Color="{StaticResource ChromeColor}"/>
+    <SolidColorBrush x:Key="ChromeElevatedBrush" Color="{StaticResource ChromeElevatedColor}"/>
+    <SolidColorBrush x:Key="ChromeBorderBrush" Color="{StaticResource ChromeBorderColor}"/>
+    <SolidColorBrush x:Key="ChromeTextBrush" Color="{StaticResource ChromeTextColor}"/>
+    <SolidColorBrush x:Key="ChromeMutedBrush" Color="{StaticResource ChromeMutedColor}"/>
 </ResourceDictionary>

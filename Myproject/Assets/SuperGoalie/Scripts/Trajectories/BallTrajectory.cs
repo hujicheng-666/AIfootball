@@ -36,6 +36,8 @@ namespace Assets.SuperGoalie.Scripts.Trajectories
 
         public int SampleCount { get { return _samples.Count; } }
 
+        public IList<TrajectorySample> Samples { get { return _samples.AsReadOnly(); } }
+
         public float Duration { get { return _samples[_samples.Count - 1].Time; } }
 
         public Vector3 InitialCenter { get { return _samples[0].CenterPosition; } }

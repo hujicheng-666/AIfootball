@@ -222,6 +222,9 @@ public class PipelineViewModel : ViewModelBase
         InitSteps(targetSamples);
         ProcessingProgress = 0;
         ProcessingProgressText = "等待 Python 任务启动";
+        _mainVm.SetPipelineState(
+            !SkipReconstruct ? 2 : !SkipBallistic ? 3 : 4,
+            !SkipReconstruct ? "准备三维重建" : !SkipBallistic ? "准备弹道拟合" : "准备 Unity 导出");
 
         _mainVm.AddLog("info", $"======== 离线处理 {targetSamples.Count} 个样本 ========");
 
@@ -244,7 +247,10 @@ public class PipelineViewModel : ViewModelBase
             {
                 ProcessingProgress = 100;
                 ProcessingProgressText = "全部完成";
+                _mainVm.SetPipelineState(5, "处理完成");
             }
+            else
+                _mainVm.SetPipelineState(-1, "处理失败");
             _mainVm.AddLog(success ? "success" : "error",
                 success ? "======== 全部完成 ========" : "======== 处理失败 ========");
             await _mainVm.RefreshListsAsync();
@@ -252,6 +258,7 @@ public class PipelineViewModel : ViewModelBase
         catch (Exception ex)
         {
             CompleteRemainingSteps(false);
+            _mainVm.SetPipelineState(-1, "处理异常");
             _mainVm.AddLog("error", "流水线异常: " + ex.Message);
         }
         finally
@@ -295,6 +302,7 @@ public class PipelineViewModel : ViewModelBase
         InitSteps(new List<string> { SampleName });
         ProcessingProgress = 0;
         ProcessingProgressText = "等待采集任务启动";
+        _mainVm.SetPipelineState(1, "双摄采集中");
 
         _mainVm.AddLog("info", $"======== 在线录制: {SampleName} ========");
 
@@ -317,7 +325,10 @@ public class PipelineViewModel : ViewModelBase
             {
                 ProcessingProgress = 100;
                 ProcessingProgressText = "录制与处理完成";
+                _mainVm.SetPipelineState(5, "录制与处理完成");
             }
+            else
+                _mainVm.SetPipelineState(-1, "录制或处理失败");
             _mainVm.AddLog(success ? "success" : "error",
                 success ? "录制与处理完成" : "录制或处理失败");
             await _mainVm.RefreshListsAsync();
@@ -326,6 +337,7 @@ public class PipelineViewModel : ViewModelBase
         {
             CompleteRemainingSteps(false);
             ProcessingProgressText = "任务异常，详情已写入日志文件";
+            _mainVm.SetPipelineState(-1, "任务异常");
             _mainVm.AddLog("error", "在线任务异常: " + ex.Message);
         }
         finally
@@ -374,6 +386,7 @@ public class PipelineViewModel : ViewModelBase
     private void OnCancel()
     {
         _cts?.Cancel();
+        _mainVm.SetPipelineState(-1, "任务已取消");
         _mainVm.AddLog("warn", "操作已取消");
     }
 
@@ -546,6 +559,13 @@ public class PipelineViewModel : ViewModelBase
         _currentSampleIndex = 0;
         ProcessingProgress = basePercent;
         ProcessingProgressText = text;
+        _mainVm.SetPipelineState(description switch
+        {
+            "3D 重建" => 2,
+            "弹道拟合" => 3,
+            "Unity 导出" => 4,
+            _ => 0
+        }, text);
     }
 
     private void FinishRunningStep(StepStatus status)

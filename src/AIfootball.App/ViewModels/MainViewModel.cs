@@ -7,12 +7,15 @@ using AIfootball.App.Services.Interfaces;
 namespace AIfootball.App.ViewModels;
 
 /// <summary>主窗口 ViewModel — 仪表盘</summary>
-public class MainViewModel : ViewModelBase
+public class MainViewModel : ViewModelBase, IDisposable
 {
     private readonly IPipelineService _pipelineService;
     private readonly IPythonEngine _pythonEngine;
     private readonly IEnvironmentService _environmentService;
     private readonly IGpuDetectionService _gpuService;
+    private readonly object _sampleWatcherLock = new();
+    private FileSystemWatcher? _sampleWatcher;
+    private CancellationTokenSource? _sampleRefreshCancellation;
 
     public MainViewModel(
         IPipelineService pipelineService,
@@ -25,7 +28,6 @@ public class MainViewModel : ViewModelBase
         _environmentService = environmentService;
         _gpuService = gpuService;
 
-        RefreshCommand = new RelayCommand(async () => await OnRefreshAsync());
         SetupEnvironmentCommand = new RelayCommand(async () => await OnSetupEnvironment());
     }
 
@@ -97,6 +99,27 @@ public class MainViewModel : ViewModelBase
         set => SetProperty(ref _sampleCount, value);
     }
 
+    // ─── 仪表盘分析链路（由真实流水线状态驱动） ───
+    private int _pipelineStage;
+    public int PipelineStage
+    {
+        get => _pipelineStage;
+        private set => SetProperty(ref _pipelineStage, value);
+    }
+
+    private string _pipelineStatusText = "等待处理任务";
+    public string PipelineStatusText
+    {
+        get => _pipelineStatusText;
+        private set => SetProperty(ref _pipelineStatusText, value);
+    }
+
+    public void SetPipelineState(int stage, string statusText)
+    {
+        PipelineStage = stage;
+        PipelineStatusText = statusText;
+    }
+
     // ─── 门将 ───
     public ObservableCollection<GoalkeeperInfo> Goalkeepers { get; } = new();
 
@@ -123,7 +146,6 @@ public class MainViewModel : ViewModelBase
     }
 
     // ─── 命令 ───
-    public RelayCommand RefreshCommand { get; }
     public RelayCommand SetupEnvironmentCommand { get; }
 
     // ─── 方法 ───
@@ -193,6 +215,7 @@ public class MainViewModel : ViewModelBase
         try
         {
             await RefreshListsAsync();
+            StartSampleWatcher();
             AddLog("info", $"📦 样本: {SampleCount} 个, 门将: {Goalkeepers.Count} 个");
         }
         catch (Exception ex)
@@ -254,9 +277,75 @@ public class MainViewModel : ViewModelBase
             Goalkeepers.Add(gk);
 
         CalibrationStatus = calib;
+        SyncPipelineSampleItems();
     }
 
     /// <summary>视频内参标定：左右各用一段棋盘格视频</summary>
+    private void StartSampleWatcher()
+    {
+        if (_sampleWatcher is not null) return;
+
+        var samplesDirectory = Path.Combine(_pythonEngine.WorkspaceDir, "samples");
+        if (!Directory.Exists(samplesDirectory)) return;
+
+        _sampleWatcher = new FileSystemWatcher(samplesDirectory)
+        {
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
+                           NotifyFilters.LastWrite | NotifyFilters.Size,
+            EnableRaisingEvents = true
+        };
+        _sampleWatcher.Changed += OnSampleDirectoryChanged;
+        _sampleWatcher.Created += OnSampleDirectoryChanged;
+        _sampleWatcher.Deleted += OnSampleDirectoryChanged;
+        _sampleWatcher.Renamed += OnSampleDirectoryRenamed;
+    }
+
+    private void OnSampleDirectoryChanged(object sender, FileSystemEventArgs e) => QueueSampleRefresh();
+
+    private void OnSampleDirectoryRenamed(object sender, RenamedEventArgs e) => QueueSampleRefresh();
+
+    private void QueueSampleRefresh()
+    {
+        CancellationToken token;
+        lock (_sampleWatcherLock)
+        {
+            _sampleRefreshCancellation?.Cancel();
+            _sampleRefreshCancellation?.Dispose();
+            _sampleRefreshCancellation = new CancellationTokenSource();
+            token = _sampleRefreshCancellation.Token;
+        }
+
+        _ = RefreshSamplesAfterFileChangeAsync(token);
+    }
+
+    private async Task RefreshSamplesAfterFileChangeAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(600), token);
+            await Application.Current.Dispatcher.InvokeAsync(async () =>
+            {
+                if (token.IsCancellationRequested) return;
+                await RefreshListsAsync();
+            }).Task.Unwrap();
+        }
+        catch (OperationCanceledException)
+        {
+            // A later file event has superseded this refresh.
+        }
+        catch (Exception ex)
+        {
+            AddLog("warn", $"样本目录自动同步失败: {ex.Message}");
+        }
+    }
+
+    private void SyncPipelineSampleItems()
+    {
+        var pipelineVm = App.Services.GetService(typeof(PipelineViewModel)) as PipelineViewModel;
+        pipelineVm?.SyncSampleItems();
+    }
+
     public async Task<bool> CalibrateIntrinsicsAsync(string leftVideo, string rightVideo)
     {
         if (!IsEnvironmentReady)
@@ -304,12 +393,6 @@ public class MainViewModel : ViewModelBase
             return ok;
         }
         finally { IsCalibrationRunning = false; }
-    }
-
-    private async Task OnRefreshAsync()
-    {
-        await RefreshListsAsync();
-        AddLog("info", "列表已刷新");
     }
 
     private async Task OnSetupEnvironment()
@@ -377,5 +460,12 @@ public class MainViewModel : ViewModelBase
         var match = System.Text.RegularExpressions.Regex.Match(message, @"(\d{1,3})%");
         if (match.Success && int.TryParse(match.Groups[1].Value, out var percent))
             CalibrationProgress = Math.Clamp(percent, 0, 99);
+    }
+
+    public void Dispose()
+    {
+        _sampleWatcher?.Dispose();
+        _sampleRefreshCancellation?.Cancel();
+        _sampleRefreshCancellation?.Dispose();
     }
 }

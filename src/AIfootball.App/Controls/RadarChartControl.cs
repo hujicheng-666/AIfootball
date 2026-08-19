@@ -19,10 +19,21 @@ public sealed class RadarChartControl : FrameworkElement
         nameof(Values), typeof(double[]), typeof(RadarChartControl),
         new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
 
+    public static readonly DependencyProperty AxisLabelsProperty = DependencyProperty.Register(
+        nameof(AxisLabels), typeof(string[]), typeof(RadarChartControl),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.AffectsRender));
+
     public double[]? Values
     {
         get => (double[]?)GetValue(ValuesProperty);
         set => SetValue(ValuesProperty, value);
+    }
+
+    /// <summary>Optional axis labels. When omitted, the goalkeeper labels are used.</summary>
+    public string[]? AxisLabels
+    {
+        get => (string[]?)GetValue(AxisLabelsProperty);
+        set => SetValue(AxisLabelsProperty, value);
     }
 
     protected override void OnRender(DrawingContext dc)
@@ -93,10 +104,11 @@ public sealed class RadarChartControl : FrameworkElement
         var labelBrush = new SolidColorBrush(Color.FromRgb(0x5a, 0x68, 0x75));
         labelBrush.Freeze();
 
+        var axisNames = AxisLabels is { Length: >= 5 } ? AxisLabels : AxisNames;
         for (int i = 0; i < 5; i++)
         {
             var ft = new FormattedText(
-                AxisNames[i], CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
+                axisNames[i], CultureInfo.CurrentUICulture, FlowDirection.LeftToRight,
                 typeface, 11.0, labelBrush, dpi);
             double a = Angle(i);
             double r = maxR + 16;
