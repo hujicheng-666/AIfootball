@@ -42,6 +42,8 @@
 
   <ItemGroup>
     <None Remove="Resources\**" />
+    <Resource Include="Resources\SpotIQLogoTransparent.png" />
+    <Resource Include="Resources\SpotIQMark.png" />
   </ItemGroup>
 
   <!-- 嵌入 Python 引擎到输出目录 -->

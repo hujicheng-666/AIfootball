@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using AIfootball.App.Models;
 using AIfootball.App.Services.Interfaces;
 
@@ -7,6 +8,7 @@ namespace AIfootball.App.Services;
 /// <summary>流水线服务 — 封装 Python Pipeline 调用</summary>
 public class PipelineService : IPipelineService
 {
+    private sealed record TrajectoryDeliveryMetadata(string GoalkeeperName);
     private readonly IPythonEngine _engine;
 
     private List<int>? _cachedCameras;
@@ -27,18 +29,34 @@ public class PipelineService : IPipelineService
             .Select(d =>
             {
                 var name = Path.GetFileName(d);
-                var videos = Directory.GetFiles(d, "*.mp4");
+                var leftVideos = GetCameraVideos(d, "left");
+                var rightVideos = GetCameraVideos(d, "right");
                 var output3d = Path.Combine(_engine.WorkspaceDir, "output", "trajectory_3d", name);
                 var outputB = Path.Combine(_engine.WorkspaceDir, "output", "trajectory_ballistic", name);
                 var unityCsv = Path.Combine(_engine.WorkspaceDir, "data", $"{name}_trajectory.csv");
-                return new SampleInfo(name, d, videos.Length,
-                    Directory.Exists(output3d),
-                    Directory.Exists(outputB),
-                    File.Exists(unityCsv));
+                return new
+                {
+                    IsValid = leftVideos.Length == 1 && rightVideos.Length == 1,
+                    Sample = new SampleInfo(name, d, leftVideos.Length + rightVideos.Length,
+                        Directory.Exists(output3d),
+                        Directory.Exists(outputB),
+                        File.Exists(unityCsv))
+                };
             })
-            .Where(s => s.VideoCount >= 2)
+            // A valid sample has one video for each calibrated camera.  Do not
+            // infer sides from filenames or the image content.
+            .Where(s => s.IsValid)
+            .Select(s => s.Sample)
             .OrderBy(s => s.Name)
             .ToList();
+    }
+
+    private static string[] GetCameraVideos(string sampleDirectory, string cameraName)
+    {
+        var cameraDirectory = Path.Combine(sampleDirectory, cameraName);
+        return Directory.Exists(cameraDirectory)
+            ? Directory.GetFiles(cameraDirectory, "*.mp4", SearchOption.TopDirectoryOnly)
+            : Array.Empty<string>();
     }
 
     public List<GoalkeeperInfo> ScanGoalkeepers()
@@ -104,10 +122,49 @@ public class PipelineService : IPipelineService
             outputReceived: line => logProgress?.Report((line, "output")),
             errorReceived: line => logProgress?.Report((line, "error")));
 
+        if (code == 0 && !string.IsNullOrWhiteSpace(goalkeeperName))
+            SaveGoalkeeperSelection(sampleNames, goalkeeperName);
+
         logProgress?.Report((code == 0 ? "======== 全部完成 ========" : $"处理失败 (退出码: {code})",
             code == 0 ? "success" : "error"));
         return code == 0;
     }
+
+    public string? GetGoalkeeperForTrajectory(string sampleName)
+    {
+        if (string.IsNullOrWhiteSpace(sampleName))
+            return null;
+
+        var path = GetTrajectoryMetadataPath(sampleName);
+        if (!File.Exists(path))
+            return null;
+
+        try
+        {
+            var metadata = JsonSerializer.Deserialize<TrajectoryDeliveryMetadata>(File.ReadAllText(path));
+            return string.IsNullOrWhiteSpace(metadata?.GoalkeeperName) ? null : metadata.GoalkeeperName;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void SaveGoalkeeperSelection(IEnumerable<string> sampleNames, string goalkeeperName)
+    {
+        foreach (var sampleName in sampleNames.Where(name => !string.IsNullOrWhiteSpace(name)))
+        {
+            var trajectory = Path.Combine(_engine.WorkspaceDir, "data", $"{sampleName}_trajectory.csv");
+            if (!File.Exists(trajectory))
+                continue;
+
+            File.WriteAllText(GetTrajectoryMetadataPath(sampleName),
+                JsonSerializer.Serialize(new TrajectoryDeliveryMetadata(goalkeeperName)));
+        }
+    }
+
+    private string GetTrajectoryMetadataPath(string sampleName) =>
+        Path.Combine(_engine.WorkspaceDir, "data", $"{sampleName}_trajectory.meta.json");
 
     public async Task<bool> RunOnlineAsync(
         string camLeft, string camRight, string sampleName,

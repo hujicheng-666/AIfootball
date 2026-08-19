@@ -8,6 +8,14 @@ from pathlib import Path
 ENGINE_DIR = Path(__file__).parent
 
 
+def has_camera_videos(sample_dir: Path) -> bool:
+    """A sample is valid only when each named camera folder contains one MP4."""
+    return all(
+        len([path for path in (sample_dir / camera_name).glob("*.mp4") if path.is_file()]) == 1
+        for camera_name in ("left", "right")
+    )
+
+
 def resolve_pipeline_dir(workspace: str) -> Path:
     """查找独立运行版使用的完整流水线，避免维护两套不同算法。"""
     root = Path(workspace).resolve()
@@ -169,7 +177,7 @@ def main():
 
     if args.command == "offline":
         samples = args.samples or [d.name for d in (Path(ws) / "samples").iterdir()
-                                   if d.is_dir() and len(list(d.glob("*.mp4"))) >= 2]
+                                   if d.is_dir() and has_camera_videos(d)]
         if not samples:
             print("没有可用样本")
             return 1
@@ -181,7 +189,7 @@ def main():
     if args.command == "online":
         # 目标样本目录
         sample_dir = Path(ws).resolve() / "samples" / args.sample
-        if sample_dir.exists() and len(list(sample_dir.glob("*.mp4"))) >= 2:
+        if sample_dir.exists() and has_camera_videos(sample_dir):
             print(f"样本目录已存在视频，跳过录制: {sample_dir}")
         else:
             print(f"在线录制 -> {sample_dir}")

@@ -84,6 +84,27 @@ public record GoalkeeperInfo(
     string FilePath
 );
 
+/// <summary>
+/// 由训练 CSV 原始轨迹生成的点球手画像。不会使用 Unity 回放或门将仿真结果。
+/// </summary>
+public record ShooterProfileResult(
+    int SourceFileCount,
+    int UniqueTrajectoryCount,
+    int DuplicateTrajectoryCount,
+    int InvalidFileCount,
+    float AverageSpeed,
+    float AverageTargetOffset,
+    float TargetSpread,
+    float AverageTargetHeight,
+    string PreferredSide,
+    string PreferredHeight,
+    string PowerTrait,
+    string ConsistencyTrait
+)
+{
+    public bool HasData => UniqueTrajectoryCount > 0;
+}
+
 /// <summary>门将属性（从 data/goalkeepers/*.json 解析，雷达图用）</summary>
 public class GoalkeeperStats
 {

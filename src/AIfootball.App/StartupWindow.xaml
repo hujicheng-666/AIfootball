@@ -49,6 +49,8 @@
                 <Ellipse Canvas.Left="530" Canvas.Top="-410" Width="1150" Height="1150" Stroke="#173D4D" StrokeThickness="2" Opacity="0.65"/>
                 <Ellipse Canvas.Left="665" Canvas.Top="-275" Width="880" Height="880" Stroke="#0D2734" StrokeThickness="1" Opacity="0.8"/>
 
+                <Image Source="/Resources/SpotIQMark.png" Canvas.Left="110" Canvas.Top="42" Width="170" Height="106" Stretch="Uniform"/>
+
                 <Path Data="M 0,710 L 1600,620" Stroke="#164858" StrokeThickness="2" Opacity="0.7"/>
                 <Path Data="M 40,765 L 1560,665" Stroke="#0B5D70" StrokeThickness="1" StrokeDashArray="3 8" Opacity="0.8"/>
                 <Path Data="M 130,770 L 1120,490" Stroke="#168CA2" StrokeThickness="2" Opacity="0.52"/>

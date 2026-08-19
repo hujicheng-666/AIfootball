@@ -50,6 +50,12 @@ public interface IGpuDetectionService
     Task<GpuInfo> DetectAsync();
 }
 
+/// <summary>从工作区训练 CSV 生成点球手特点。</summary>
+public interface IShooterProfileService
+{
+    ShooterProfileResult AnalyzeTrainingData();
+}
+
 /// <summary>流水线服务接口</summary>
 public interface IPipelineService
 {
@@ -100,6 +106,9 @@ public interface IPipelineService
     /// <summary>启动 Unity 查看器</summary>
     Process? LaunchUnityViewer(List<string> sampleNames, string? goalkeeperName = null, bool embedded = false,
         nint hostWindowHandle = 0);
+
+    /// <summary>读取某个已交付轨迹所绑定的门将；旧结果或未选择时返回 null。</summary>
+    string? GetGoalkeeperForTrajectory(string sampleName);
 
     /// <summary>视频内参标定：左右各用一段棋盘格视频</summary>
     Task<bool> CalibrateIntrinsicsAsync(

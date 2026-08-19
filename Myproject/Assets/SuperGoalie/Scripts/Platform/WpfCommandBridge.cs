@@ -176,6 +176,17 @@ namespace Assets.SuperGoalie.Scripts.Platform
 
         void ExecuteCommand(string command)
         {
+            // WPF writes "sequence\ncommand" so two identical commands are still
+            // separate actions. Older callers can continue sending a plain command.
+            int separator = command.IndexOf('\n');
+            if (separator >= 0)
+            {
+                long sequence;
+                string prefix = command.Substring(0, separator).Trim();
+                if (long.TryParse(prefix, out sequence))
+                    command = command.Substring(separator + 1).Trim();
+            }
+
             if (command.StartsWith("csv:", StringComparison.Ordinal))
             {
                 string path = command.Substring(4).Trim().Trim('"');

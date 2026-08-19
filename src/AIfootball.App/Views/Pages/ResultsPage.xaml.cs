@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
@@ -13,6 +14,8 @@ namespace AIfootball.App.Views.Pages;
 public partial class ResultsPage : UserControl
 {
     private MainViewModel? _vm;
+    private PipelineViewModel? _pipelineVm;
+    private string? _deliveredGoalkeeperName;
     private Process? _unityProcess;
     private CancellationTokenSource? _attachCancellation;
     private Window? _ownerWindow;
@@ -26,8 +29,11 @@ public partial class ResultsPage : UserControl
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (_unityProcess is { HasExited: false }) return;
         _vm = DataContext as MainViewModel;
+        AttachPipelineViewModel();
+        UpdateSelectedGoalkeeperLabel();
+
+        if (_unityProcess is { HasExited: false }) return;
         _ownerWindow = Window.GetWindow(this);
         if (_ownerWindow != null)
             _ownerWindow.Closing += OwnerWindow_Closing;
@@ -36,6 +42,9 @@ public partial class ResultsPage : UserControl
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        if (_pipelineVm is not null)
+            _pipelineVm.PropertyChanged -= OnPipelineViewModelPropertyChanged;
+        _pipelineVm = null;
         if (_ownerWindow != null)
             _ownerWindow.Closing -= OwnerWindow_Closing;
         _ownerWindow = null;
@@ -83,7 +92,11 @@ public partial class ResultsPage : UserControl
         }
 
         var pipeline = App.Services.GetService(typeof(IPipelineService)) as IPipelineService;
-        var process = pipeline?.LaunchUnityViewer([sample], embedded: true,
+        var goalkeeperName = pipeline?.GetGoalkeeperForTrajectory(sample)
+            ?? _pipelineVm?.SelectedGoalkeeper?.Name;
+        SetDeliveredGoalkeeper(goalkeeperName);
+
+        var process = pipeline?.LaunchUnityViewer([sample], goalkeeperName, embedded: true,
             hostWindowHandle: UnityHost.HostHandle);
         if (process is null)
         {
@@ -154,6 +167,51 @@ public partial class ResultsPage : UserControl
         if (dialog.ShowDialog() == true)
             await SendUnityCommandAsync($"csv:{dialog.FileName}");
     }
+
+    private void GenerateShooterProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var profiler = App.Services.GetService(typeof(IShooterProfileService)) as IShooterProfileService;
+        if (profiler is null)
+        {
+            ShooterProfileCountText.Text = "数据未就绪";
+            ShooterProfileAttrsText.Text = "无法生成点球手数据。";
+            ShooterProfileRadar.Values = null;
+        }
+        else
+        {
+            var profile = profiler.AnalyzeTrainingData();
+            if (!profile.HasData)
+            {
+                ShooterProfileCountText.Text = "训练数据 0 条";
+                ShooterProfileAttrsText.Text = "暂无可用训练 CSV。";
+                ShooterProfileRadar.Values = null;
+            }
+            else
+            {
+                ShooterProfileCountText.Text = $"训练样本 {profile.UniqueTrajectoryCount} 条   重复 {profile.DuplicateTrajectoryCount} 条";
+                ShooterProfileAttrsText.Text =
+                    $"射门力量: {profile.AverageSpeed:0.0} m/s\n" +
+                    $"横向落点: {profile.AverageTargetOffset:0.00} m\n" +
+                    $"落点高度: {profile.AverageTargetHeight:0.00} m\n" +
+                    $"落点变化: {profile.TargetSpread:0.00} m\n" +
+                    $"方向特点: {profile.PreferredSide}\n" +
+                    $"高度特点: {profile.PreferredHeight}\n" +
+                    $"稳定特点: {profile.ConsistencyTrait}";
+                ShooterProfileRadar.AxisLabels = new[] { "力量", "稳定", "左路", "高度", "变化" };
+                ShooterProfileRadar.Values = new[]
+                {
+                    Normalize(profile.AverageSpeed, 8f, 24f),
+                    1d - Normalize(profile.TargetSpread, 0.2f, 2f),
+                    Normalize(profile.AverageTargetOffset, -3f, 3f),
+                    Normalize(profile.AverageTargetHeight, 0.2f, 2.2f),
+                    Normalize(profile.TargetSpread, 0.2f, 2f),
+                };
+            }
+            _vm?.AddLog("info", $"点球手特点已生成：有效轨迹 {profile.UniqueTrajectoryCount} 条，重复 {profile.DuplicateTrajectoryCount} 条。");
+        }
+        ShooterProfilePopup.IsOpen = true;
+    }
+
     private async void Replay_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("replay");
     private async void Reset_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("reset");
     private async void View_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("view");
@@ -184,8 +242,64 @@ public partial class ResultsPage : UserControl
         if (sender is ListBoxItem { DataContext: GoalkeeperChoice choice })
         {
             GoalkeeperPopup.IsOpen = false;
+            if (_pipelineVm is not null)
+                _pipelineVm.SelectedGoalkeeper = _pipelineVm.Goalkeepers
+                    .FirstOrDefault(goalkeeper => goalkeeper.Name == choice.Key);
+            SetDeliveredGoalkeeper(choice.Key);
             await SendUnityCommandAsync($"goalkeeper:{choice.Key}");
         }
+    }
+
+    private void AttachPipelineViewModel()
+    {
+        var pipelineVm = App.Services.GetService(typeof(PipelineViewModel)) as PipelineViewModel;
+        if (ReferenceEquals(_pipelineVm, pipelineVm))
+            return;
+
+        if (_pipelineVm is not null)
+            _pipelineVm.PropertyChanged -= OnPipelineViewModelPropertyChanged;
+
+        _pipelineVm = pipelineVm;
+        if (_pipelineVm is not null)
+            _pipelineVm.PropertyChanged += OnPipelineViewModelPropertyChanged;
+    }
+
+    private void OnPipelineViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(PipelineViewModel.SelectedGoalkeeper))
+        {
+            _deliveredGoalkeeperName = _pipelineVm?.SelectedGoalkeeper?.Name;
+            Dispatcher.InvokeAsync(UpdateSelectedGoalkeeperLabel);
+        }
+    }
+
+    private void UpdateSelectedGoalkeeperLabel()
+    {
+        var goalkeeperName = _pipelineVm?.SelectedGoalkeeper?.Name ?? _deliveredGoalkeeperName;
+        if (string.IsNullOrWhiteSpace(goalkeeperName))
+        {
+            SelectGoalkeeperButton.Content = "门将：未选择";
+            return;
+        }
+
+        var pipeline = App.Services.GetService(typeof(IPipelineService)) as IPipelineService;
+        var stats = pipeline?.LoadGoalkeeperStats(goalkeeperName);
+        var label = string.IsNullOrWhiteSpace(stats?.DisplayName) ? goalkeeperName : stats.DisplayName;
+        SelectGoalkeeperButton.Content = $"门将：{label}";
+    }
+
+    private void SetDeliveredGoalkeeper(string? goalkeeperName)
+    {
+        _deliveredGoalkeeperName = goalkeeperName;
+        if (!string.IsNullOrWhiteSpace(goalkeeperName) && _pipelineVm is not null)
+        {
+            var goalkeeper = _pipelineVm.Goalkeepers
+                .FirstOrDefault(item => item.Name == goalkeeperName);
+            if (goalkeeper is not null)
+                _pipelineVm.SelectedGoalkeeper = goalkeeper;
+        }
+
+        UpdateSelectedGoalkeeperLabel();
     }
 
     private void ShowGoalkeeperPreview(string key)
