@@ -216,21 +216,42 @@ def select_best_candidates(candidates, selection_fraction, max_selected_frames=N
     sharpness_min = min(sharpness_values)
     sharpness_max = max(sharpness_values)
 
-    remaining = candidates[:]
-    remaining.sort(key=lambda item: item["sharpness"], reverse=True)
-    selected = [remaining.pop(0)]
+    # Incrementally maintain each candidate's distance to the selected set.
+    # The previous implementation recomputed every candidate-to-selected
+    # distance on every round, which becomes impractical when retaining 80%
+    # of a long calibration video.
+    centers = np.asarray([item["center_norm"] for item in candidates], dtype=np.float64)
+    areas = np.asarray([item["area_ratio"] for item in candidates], dtype=np.float64)
+    angles = np.asarray([item["angle"] for item in candidates], dtype=np.float64)
+    sharpness = np.asarray(sharpness_values, dtype=np.float64)
+    sharpness_score = (
+        np.ones(len(candidates), dtype=np.float64)
+        if sharpness_max <= sharpness_min
+        else (sharpness - sharpness_min) / (sharpness_max - sharpness_min)
+    )
 
-    while remaining and len(selected) < target_count:
-        best_index = None
-        best_score = None
+    selected_mask = np.zeros(len(candidates), dtype=bool)
+    first_index = int(np.argmax(sharpness))
+    selected_mask[first_index] = True
+    min_distances = np.full(len(candidates), np.inf, dtype=np.float64)
 
-        for idx, candidate in enumerate(remaining):
-            score = score_candidate(candidate, selected, sharpness_min, sharpness_max)
-            if best_score is None or score > best_score:
-                best_score = score
-                best_index = idx
+    def update_min_distances(selected_index):
+        center_distance = np.linalg.norm(centers - centers[selected_index], axis=1)
+        area_distance = np.abs(areas - areas[selected_index]) * 3.0
+        angle_delta = np.abs(angles - angles[selected_index])
+        angle_distance = np.minimum(angle_delta, 2.0 * math.pi - angle_delta) / math.pi
+        distances = center_distance + area_distance + angle_distance
+        np.minimum(min_distances, distances, out=min_distances)
 
-        selected.append(remaining.pop(best_index))
+    update_min_distances(first_index)
+    while int(np.count_nonzero(selected_mask)) < target_count:
+        scores = 0.55 * min_distances + 0.45 * sharpness_score
+        scores[selected_mask] = -np.inf
+        best_index = int(np.argmax(scores))
+        selected_mask[best_index] = True
+        update_min_distances(best_index)
+
+    selected = [item for idx, item in enumerate(candidates) if selected_mask[idx]]
 
     selected.sort(key=lambda item: item["frame_index"])
     return selected
