@@ -29,7 +29,7 @@ INTRINSICS_REGISTRY_PATH = OUTPUT_DIR / "intrinsics_registry.json"
 CHECKERBOARD = (9, 6)  # (cols, rows) inner corners
 SQUARE_SIZE = 23.0
 MIN_SELECTED_FRAMES = 10
-MAX_SELECTED_FRAMES = 25
+DEFAULT_SELECTION_FRACTION = 0.80
 SCAN_EVERY = 2  # 抽帧扫描：每 N 帧检测一次棋盘格，显著加速 CPU 标定（60fps 视频仍足够密集）
 PROGRESS_REPORT_INTERVAL_SECONDS = 0.5
 CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
@@ -203,8 +203,13 @@ def score_candidate(candidate, selected_candidates, sharpness_min, sharpness_max
     return 0.55 * diversity_score + 0.45 * sharpness_score
 
 
-def select_best_candidates(candidates, max_selected_frames):
-    if len(candidates) <= max_selected_frames:
+def select_best_candidates(candidates, selection_fraction, max_selected_frames=None):
+    """Keep a diverse majority of valid detections instead of a small fixed cap."""
+    target_count = max(MIN_SELECTED_FRAMES, int(math.ceil(len(candidates) * selection_fraction)))
+    if max_selected_frames is not None:
+        target_count = min(target_count, max_selected_frames)
+    target_count = min(target_count, len(candidates))
+    if len(candidates) <= target_count:
         return candidates
 
     sharpness_values = [item["sharpness"] for item in candidates]
@@ -215,7 +220,7 @@ def select_best_candidates(candidates, max_selected_frames):
     remaining.sort(key=lambda item: item["sharpness"], reverse=True)
     selected = [remaining.pop(0)]
 
-    while remaining and len(selected) < max_selected_frames:
+    while remaining and len(selected) < target_count:
         best_index = None
         best_score = None
 
@@ -372,12 +377,15 @@ def save_undistortion_example(sample_frame, camera_matrix, dist_coeffs, profile_
     print(f"[{profile_name}] Saved undistortion preview images")
 
 
-def calibrate_profile(profile_name, video_path, max_selected_frames):
+def calibrate_profile(profile_name, video_path, selection_fraction, max_selected_frames=None):
     objp = build_object_points()
     candidates, img_size = collect_candidates(video_path)
-    selected_candidates = select_best_candidates(candidates, max_selected_frames)
+    selected_candidates = select_best_candidates(candidates, selection_fraction, max_selected_frames)
 
-    print(f"[{profile_name}] Selected {len(selected_candidates)} frames for calibration")
+    print(
+        f"[{profile_name}] Selected {len(selected_candidates)}/{len(candidates)} valid frames "
+        f"({len(selected_candidates) / len(candidates):.1%}) for calibration"
+    )
     print(f"[{profile_name}] Frame indices: {[item['frame_index'] for item in selected_candidates]}")
 
     objpoints = [objp.copy() for _ in selected_candidates]
@@ -509,7 +517,18 @@ def parse_args():
         action="append",
         help="Repeatable calibration video spec: profile=path, e.g. --video old=... --video new=...",
     )
-    parser.add_argument("--max-selected-frames", type=int, default=MAX_SELECTED_FRAMES)
+    parser.add_argument(
+        "--selection-fraction",
+        type=float,
+        default=DEFAULT_SELECTION_FRACTION,
+        help="Fraction of valid chessboard detections used for calibration (default: 0.80).",
+    )
+    parser.add_argument(
+        "--max-selected-frames",
+        type=int,
+        default=None,
+        help="Optional explicit upper limit; omit to retain the requested selection fraction.",
+    )
     parser.add_argument(
         "--out",
         default=None,
@@ -531,12 +550,21 @@ def main():
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         INTRINSICS_REGISTRY_PATH = OUTPUT_DIR / "intrinsics_registry.json"
     specs = resolve_video_specs(args)
+    if not 0.0 < args.selection_fraction <= 1.0:
+        raise ValueError("--selection-fraction must be in (0, 1].")
+    if args.max_selected_frames is not None and args.max_selected_frames < MIN_SELECTED_FRAMES:
+        raise ValueError(f"--max-selected-frames must be at least {MIN_SELECTED_FRAMES}.")
     results = []
 
     for profile_name, video_path in specs:
         print("\n========================================")
         print(f"Profile: {profile_name}")
-        result = calibrate_profile(profile_name, video_path, args.max_selected_frames)
+        result = calibrate_profile(
+            profile_name,
+            video_path,
+            args.selection_fraction,
+            args.max_selected_frames,
+        )
         save_profile_outputs(result)
         results.append(result)
 
