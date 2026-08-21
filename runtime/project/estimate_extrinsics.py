@@ -169,8 +169,6 @@ WORLD_POINTS = {
     "left_post_top": np.array([HALF_GOAL, 0.0, GOAL_HEIGHT], dtype=np.float64),
     "right_post_top": np.array([-HALF_GOAL, 0.0, GOAL_HEIGHT], dtype=np.float64),
     "penalty_spot": np.array([0.0, PENALTY_SPOT_DIST, 0.0], dtype=np.float64),
-    "left_goal_area_goal_line_intersection": np.array([HALF_GOAL_AREA, 0.0, 0.0], dtype=np.float64),
-    "right_goal_area_goal_line_intersection": np.array([-HALF_GOAL_AREA, 0.0, 0.0], dtype=np.float64),
     "left_goal_area_corner": np.array([HALF_GOAL_AREA, GOAL_AREA_DEPTH, 0.0], dtype=np.float64),
     "right_goal_area_corner": np.array([-HALF_GOAL_AREA, GOAL_AREA_DEPTH, 0.0], dtype=np.float64),
 }
@@ -181,8 +179,6 @@ POINT_LABELS = {
     "left_post_top": "left post top (射门视角)",
     "right_post_top": "right post top (射门视角)",
     "penalty_spot": "penalty spot",
-    "left_goal_area_goal_line_intersection": "left small-box / goal-line intersection",
-    "right_goal_area_goal_line_intersection": "right small-box / goal-line intersection",
     "left_goal_area_corner": "left goal-area corner (射门视角)",
     "right_goal_area_corner": "right goal-area corner (射门视角)",
 }
@@ -192,8 +188,7 @@ POINT_LABELS = {
 #   Y: 球门线 y=0, 罚球点 y=11（远离球门为正）
 #   "shooter_left"  = 射门视角左侧照片（左相机，站在场地左侧面向球门）
 #   "shooter_right" = 射门视角右侧照片（右相机，站在场地右侧面向球门）
-#   小禁区侧线在球门线处的交点与外角构成已知 5.5m 线段；左相机(场地左侧)
-#   对应射手视角右侧小禁区，右相机反之。
+#   第6个禁区角：左相机(场地左侧)画面中心偏右 → 点射手视角右侧禁区角；右相机反之。
 POINT_ORDERS = {
     "shooter_left": [
         "left_post_bottom",
@@ -201,7 +196,6 @@ POINT_ORDERS = {
         "left_post_top",
         "right_post_top",
         "penalty_spot",
-        "right_goal_area_goal_line_intersection",
         "right_goal_area_corner",
     ],
     "shooter_right": [
@@ -210,7 +204,6 @@ POINT_ORDERS = {
         "left_post_top",
         "right_post_top",
         "penalty_spot",
-        "left_goal_area_goal_line_intersection",
         "left_goal_area_corner",
     ],
 }
@@ -562,7 +555,7 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
 
 
 def calibration_line_pairs(view_type):
-    """Known field segments that can be observed from the seven click anchors."""
+    """Known field segments that can be observed from the configured click anchors."""
     goal_area_side = "right" if view_type == "shooter_left" else "left"
     return [
         ("left_goal_post", "left_post_bottom", "left_post_top"),
@@ -1063,7 +1056,7 @@ def process_task(meta, enable_line_refinement=False):
     line_refinement = {
         "enabled": bool(enable_line_refinement),
         "accepted": False,
-        "reason": "disabled; using seven-point robust PnP only",
+        "reason": "disabled; using manual-point robust PnP only",
         "detected_line_count": 0,
         "lines": [],
     }
@@ -1250,7 +1243,7 @@ def parse_args():
     parser.add_argument(
         "--enable-line-refinement",
         action="store_true",
-        help="Experimental: refine the seven-point PnP result with automatically detected field lines.",
+        help="Experimental: refine the manual-point PnP result with automatically detected field lines.",
     )
     return parser.parse_args()
 
