@@ -168,6 +168,8 @@ WORLD_POINTS = {
     "left_post_top": np.array([HALF_GOAL, 0.0, GOAL_HEIGHT], dtype=np.float64),
     "right_post_top": np.array([-HALF_GOAL, 0.0, GOAL_HEIGHT], dtype=np.float64),
     "penalty_spot": np.array([0.0, PENALTY_SPOT_DIST, 0.0], dtype=np.float64),
+    "left_goal_area_goal_line_intersection": np.array([HALF_GOAL_AREA, 0.0, 0.0], dtype=np.float64),
+    "right_goal_area_goal_line_intersection": np.array([-HALF_GOAL_AREA, 0.0, 0.0], dtype=np.float64),
     "left_goal_area_corner": np.array([HALF_GOAL_AREA, GOAL_AREA_DEPTH, 0.0], dtype=np.float64),
     "right_goal_area_corner": np.array([-HALF_GOAL_AREA, GOAL_AREA_DEPTH, 0.0], dtype=np.float64),
 }
@@ -178,6 +180,8 @@ POINT_LABELS = {
     "left_post_top": "left post top (射门视角)",
     "right_post_top": "right post top (射门视角)",
     "penalty_spot": "penalty spot",
+    "left_goal_area_goal_line_intersection": "left small-box / goal-line intersection",
+    "right_goal_area_goal_line_intersection": "right small-box / goal-line intersection",
     "left_goal_area_corner": "left goal-area corner (射门视角)",
     "right_goal_area_corner": "right goal-area corner (射门视角)",
 }
@@ -187,7 +191,8 @@ POINT_LABELS = {
 #   Y: 球门线 y=0, 罚球点 y=11（远离球门为正）
 #   "shooter_left"  = 射门视角左侧照片（左相机，站在场地左侧面向球门）
 #   "shooter_right" = 射门视角右侧照片（右相机，站在场地右侧面向球门）
-#   第6个禁区角：左相机(场地左侧)画面中心偏右 → 点射手视角右侧禁区角；右相机反之
+#   小禁区侧线在球门线处的交点与外角构成已知 5.5m 线段；左相机(场地左侧)
+#   对应射手视角右侧小禁区，右相机反之。
 POINT_ORDERS = {
     "shooter_left": [
         "left_post_bottom",
@@ -195,6 +200,7 @@ POINT_ORDERS = {
         "left_post_top",
         "right_post_top",
         "penalty_spot",
+        "right_goal_area_goal_line_intersection",
         "right_goal_area_corner",
     ],
     "shooter_right": [
@@ -203,6 +209,7 @@ POINT_ORDERS = {
         "left_post_top",
         "right_post_top",
         "penalty_spot",
+        "left_goal_area_goal_line_intersection",
         "left_goal_area_corner",
     ],
 }
