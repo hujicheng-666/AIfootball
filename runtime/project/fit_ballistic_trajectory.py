@@ -19,7 +19,8 @@ except Exception:
 from project.config import WORKSPACE as WORKSPACE_DIR, CALIB
 from project.constants import (
     GRAVITY,
-    PENALTY_SPOT_WORLD,
+    BALL_RADIUS_M,
+    PENALTY_SPOT_BALL_CENTER_WORLD,
     FIELD_X_LIMITS,
     FIELD_Y_LIMITS,
     GOAL_LINE_Y,
@@ -30,6 +31,10 @@ from project.constants import (
 INPUT_ROOT = WORKSPACE_DIR / "output" / "trajectory_3d"
 OUTPUT_ROOT = WORKSPACE_DIR / "output" / "trajectory_ballistic"
 Z_LIMITS = (-0.5, 4.5)
+MIN_BALLISTIC_INLIERS = 8
+MIN_CONSENSUS_REFINEMENT_INLIERS = 4
+MIN_FIT_REPROJECTION_THRESHOLD_PX = 3.0
+CALIBRATION_REPROJECTION_BUDGET_SCALE = 1.5
 
 
 @dataclass
@@ -209,9 +214,9 @@ def evaluate_ballistic(params, times_abs, time_origin_sec):
 
 def compose_params_from_penalty_launch(launch_time_sec, vx, vy, vz_launch, reference_time_sec):
     tau0 = float(reference_time_sec) - float(launch_time_sec)
-    x0 = float(PENALTY_SPOT_WORLD[0] + float(vx) * tau0)
-    y0 = float(PENALTY_SPOT_WORLD[1] + float(vy) * tau0)
-    z0 = float(PENALTY_SPOT_WORLD[2] + float(vz_launch) * tau0 - 0.5 * GRAVITY * (tau0 ** 2))
+    x0 = float(PENALTY_SPOT_BALL_CENTER_WORLD[0] + float(vx) * tau0)
+    y0 = float(PENALTY_SPOT_BALL_CENTER_WORLD[1] + float(vy) * tau0)
+    z0 = float(PENALTY_SPOT_BALL_CENTER_WORLD[2] + float(vz_launch) * tau0 - 0.5 * GRAVITY * (tau0 ** 2))
     vz0 = float(vz_launch - GRAVITY * tau0)
     return x0, float(vx), y0, float(vy), z0, vz0
 
@@ -265,7 +270,7 @@ def estimate_penalty_launch_init_params(
             points,
             point_weights,
             float(launch_time_sec),
-            PENALTY_SPOT_WORLD,
+            PENALTY_SPOT_BALL_CENTER_WORLD,
         )
         vx = float(params_origin[1])
         vy = float(params_origin[3])
@@ -375,7 +380,6 @@ def optimize_ballistic_reprojection(
     best_score = objective(current)
     step = np.array([0.02, 0.85, 1.1, 0.75], dtype=np.float64)
     rng = np.random.default_rng(42)
-
     for _ in range(14):
         improved = False
         for axis in range(len(current)):
@@ -386,21 +390,14 @@ def optimize_ballistic_reprojection(
                 trial[axis] = np.clip(trial[axis] + direction * step[axis], lower[axis], upper[axis])
                 score = objective(trial)
                 if score < axis_best_score:
-                    axis_best = trial
-                    axis_best_score = score
+                    axis_best, axis_best_score = trial, score
             if axis_best_score < best_score:
-                current = axis_best
-                best_score = axis_best_score
-                improved = True
-
+                current, best_score, improved = axis_best, axis_best_score, True
         for _ in range(24):
             trial = np.clip(current + rng.normal(scale=step, size=current.shape), lower, upper)
             score = objective(trial)
             if score < best_score:
-                current = trial
-                best_score = score
-                improved = True
-
+                current, best_score, improved = trial, score, True
         step *= 0.8 if improved else 0.5
         if float(np.max(step)) < 1e-3:
             break
@@ -466,7 +463,11 @@ def optimize_ballistic_from_origin_reprojection(
             axis_best_score = best_score
             for direction in (-1.0, 1.0):
                 trial = current.copy()
-                trial[axis] = np.clip(trial[axis] + direction * step[axis], lower[axis], upper[axis])
+                trial[axis] = np.clip(
+                    trial[axis] + direction * step[axis],
+                    lower[axis],
+                    upper[axis],
+                )
                 score = objective(trial)
                 if score < axis_best_score:
                     axis_best = trial
@@ -545,6 +546,53 @@ def build_base_weights(ray_gaps, reprojection_errors):
     reproj_term = np.clip(reprojection_errors / max(1e-6, float(np.median(reprojection_errors) + 1e-6)), 0.0, 6.0)
     weights = 1.0 / (1.0 + 0.7 * gap_term + 0.5 * reproj_term)
     return np.clip(weights, 0.05, 1.0)
+
+
+def calibration_reprojection_budget_px():
+    """Return the current stereo calibration's admissible mean reprojection error.
+
+    The fit error is the mean error after projecting a 3D curve into both
+    cameras, so its allowance must be derived from the active extrinsic
+    calibration rather than a project-wide pixel constant.  The multiplier
+    leaves room for ball-centre detection noise while retaining the measured
+    calibration as an upper bound.
+    """
+    mean_errors = []
+    for name in ("left", "right"):
+        path = CALIB / f"{name}_extrinsics.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            error = float(payload["mean_reprojection_error"])
+        except (FileNotFoundError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if np.isfinite(error) and error > 0.0:
+            mean_errors.append(error)
+
+    if not mean_errors:
+        return None
+    return float(CALIBRATION_REPROJECTION_BUDGET_SCALE * np.mean(mean_errors))
+
+
+def calculate_inlier_threshold_px(reprojection_errors):
+    """Derive a robust inlier threshold, bounded by the active calibration."""
+    errors = np.asarray(reprojection_errors, dtype=np.float64)
+    finite_errors = errors[np.isfinite(errors)]
+    if len(finite_errors) == 0:
+        calibration_budget = calibration_reprojection_budget_px()
+        return (
+            float(calibration_budget)
+            if calibration_budget is not None
+            else MIN_FIT_REPROJECTION_THRESHOLD_PX
+        )
+
+    # The fit population supplies a robust local threshold.  Calibration then
+    # caps it automatically: a bad candidate cannot gain support merely by
+    # inflating its residual distribution.
+    threshold = float(np.percentile(finite_errors, 75) * 1.35)
+    calibration_budget = calibration_reprojection_budget_px()
+    if calibration_budget is not None:
+        threshold = min(threshold, calibration_budget)
+    return max(MIN_FIT_REPROJECTION_THRESHOLD_PX, threshold)
 
 
 def select_flight_prefix_length(times, points, base_weights):
@@ -659,7 +707,7 @@ def fit_rebound_ballistic_segment(
 
     origin_time_sec = float(landing_time_sec)
     origin_point = np.asarray(landing_point, dtype=np.float64).reshape(3).copy()
-    origin_point[2] = 0.0
+    origin_point[2] = BALL_RADIUS_M
     candidates = []
     for extra_after_cross in (0.0, 0.02, 0.04, 0.06):
         segment_end = min(float(np.max(finite_times)), float(cross_time_sec) + extra_after_cross)
@@ -858,7 +906,10 @@ def optimize_ground_rollout_reprojection(
             image_points_right,
             camera_configs,
         )
-        z_penalty = np.average(np.maximum(np.abs(world_points[:, 2]) - 0.08, 0.0) ** 2, weights=point_weights)
+        z_penalty = np.average(
+            np.maximum(np.abs(world_points[:, 2] - BALL_RADIUS_M) - 0.08, 0.0) ** 2,
+            weights=point_weights,
+        )
         return float(np.average(mean_err ** 2, weights=point_weights) + 220.0 * z_penalty)
 
     best_score = objective(current)
@@ -945,6 +996,10 @@ def fit_ground_rollout_segment(
 
     start_point = np.asarray(landing_point, dtype=np.float64).reshape(3)
     end_point = np.asarray(cross_point, dtype=np.float64).reshape(3)
+    # A rollout is constrained to the pitch: triangulation noise must not turn
+    # the observed goal-line point into a ball centre below the ground plane.
+    start_point[2] = BALL_RADIUS_M
+    end_point[2] = BALL_RADIUS_M
     robust_weights = base_weights.copy()
     fitted_obs = np.zeros_like(obs_points)
     residuals = None
@@ -1105,8 +1160,7 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
         inlier_reproj = fit_reprojection_errors_px[mask]
         if len(inlier_reproj) == 0:
             break
-        threshold = float(np.percentile(inlier_reproj, 75) * 1.35)
-        threshold = max(3.0, min(threshold, 18.0))
+        threshold = calculate_inlier_threshold_px(inlier_reproj)
         new_mask = fit_reprojection_errors_px <= threshold
         new_mask &= points[:, 2] >= -0.10
         new_mask &= np.isfinite(fit_reprojection_errors_px)
@@ -1146,13 +1200,63 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
         image_points_right,
         camera_configs,
     )
-    final_threshold = float(np.percentile(fit_reprojection_errors_px, 75) * 1.35)
-    final_threshold = max(3.0, min(final_threshold, 18.0))
+    final_threshold = calculate_inlier_threshold_px(fit_reprojection_errors_px)
     final_mask = fit_reprojection_errors_px <= final_threshold
     final_mask &= points[:, 2] >= -0.10
     final_mask &= np.isfinite(fit_reprojection_errors_px)
-    if np.count_nonzero(final_mask) >= 8:
-        mask = final_mask
+
+    # The first global pass can be pulled away by a handful of mismatched stereo
+    # pairs.  Polish the strongest consensus without relaxing the quality
+    # threshold: a replacement is accepted only when it gains support, or keeps
+    # the same support with a lower inlier reprojection RMS.
+    for _ in range(3):
+        consensus_idx = np.where(final_mask)[0]
+        if len(consensus_idx) < MIN_CONSENSUS_REFINEMENT_INLIERS:
+            break
+
+        candidate_params = optimize_ballistic_reprojection(
+            params,
+            time_origin_sec,
+            times[consensus_idx],
+            points[consensus_idx],
+            image_points_left[consensus_idx],
+            image_points_right[consensus_idx],
+            base_weights[consensus_idx],
+            confidences_left[consensus_idx],
+            confidences_right[consensus_idx],
+            camera_configs,
+        )
+        candidate_errors, _, _ = compute_fit_reprojection_errors_px(
+            candidate_params,
+            time_origin_sec,
+            times,
+            image_points_left,
+            image_points_right,
+            camera_configs,
+        )
+        candidate_threshold = calculate_inlier_threshold_px(candidate_errors)
+        candidate_mask = candidate_errors <= candidate_threshold
+        candidate_mask &= points[:, 2] >= -0.10
+        candidate_mask &= np.isfinite(candidate_errors)
+
+        current_count = int(np.count_nonzero(final_mask))
+        candidate_count = int(np.count_nonzero(candidate_mask))
+        current_rms = float(np.sqrt(np.mean(fit_reprojection_errors_px[final_mask] ** 2)))
+        candidate_rms = float(np.sqrt(np.mean(candidate_errors[candidate_mask] ** 2)))
+        if candidate_count < current_count or (candidate_count == current_count and candidate_rms >= current_rms):
+            break
+
+        params = candidate_params
+        fit_reprojection_errors_px = candidate_errors
+        final_threshold = candidate_threshold
+        final_mask = candidate_mask
+
+    fitted_points = evaluate_ballistic(params, times, time_origin_sec)
+    residuals = np.linalg.norm(points - fitted_points, axis=1)
+    # Keep the final mask even when it fails the quality gate.  The caller must
+    # still receive a best-effort trajectory for playback, but the mask is not
+    # silently replaced by an earlier (stale) one just to make the fit look good.
+    mask = final_mask
 
     # 纯重力抛物线模型（空气阻力模型已废弃移除）
     x0, vx, y0, vy, z0, vz = params[:6]
@@ -1164,7 +1268,7 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
     landing_time_sec = None
     landing_point = None
     launch_time_sec = None
-    disc = vz * vz + 2.0 * GRAVITY * z0
+    disc = vz * vz + 2.0 * GRAVITY * (z0 - BALL_RADIUS_M)
     if disc >= 0.0:
         sqrt_disc = math.sqrt(disc)
         tau_launch = (vz - sqrt_disc) / GRAVITY
@@ -1206,12 +1310,12 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
     if launch_time_sec is not None:
         launch_idx = int(np.argmin(np.abs(dense_times - float(launch_time_sec))))
         if abs(float(dense_times[launch_idx]) - float(launch_time_sec)) <= 1e-5:
-            dense_points[launch_idx] = PENALTY_SPOT_WORLD
+            dense_points[launch_idx] = PENALTY_SPOT_BALL_CENTER_WORLD
     if landing_time_sec is not None and landing_point is not None:
         landing_idx = int(np.argmin(np.abs(dense_times - float(landing_time_sec))))
         if abs(float(dense_times[landing_idx]) - float(landing_time_sec)) <= 1e-5:
             dense_points[landing_idx] = np.asarray(landing_point, dtype=np.float64)
-    dense_keep = dense_points[:, 2] >= -0.05
+    dense_keep = dense_points[:, 2] >= BALL_RADIUS_M - 1e-6
     if np.any(dense_keep):
         dense_times = dense_times[dense_keep]
         dense_points = dense_points[dense_keep]
@@ -1268,6 +1372,13 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
                 else:
                     dense_times = rollout_fit['dense_times']
                     dense_points = rollout_fit['dense_points']
+
+    # Post-landing models are generated independently of the air segment, so
+    # validate the final stitched curve as one physical ball-centre trajectory.
+    dense_keep = dense_points[:, 2] >= BALL_RADIUS_M - 1e-6
+    if np.any(dense_keep):
+        dense_times = dense_times[dense_keep]
+        dense_points = dense_points[dense_keep]
 
     goal_line_crossing_time_sec, goal_line_crossing_point = detect_goal_line_crossing(dense_times, dense_points)
     if goal_line_crossing_point is None:
@@ -1395,6 +1506,18 @@ def save_summary(path, fit):
         "time_offset_seconds": float(fit.offset_seconds),
         "num_observed_points": int(len(fit.times)),
         "num_inlier_points": int(np.count_nonzero(fit.inlier_mask)),
+        "quality_gate": {
+            "passed": int(np.count_nonzero(fit.inlier_mask)) >= MIN_BALLISTIC_INLIERS,
+            "export_allowed": True,
+            "mode": (
+                "validated_ballistic"
+                if int(np.count_nonzero(fit.inlier_mask)) >= MIN_BALLISTIC_INLIERS
+                else "best_effort_ballistic"
+            ),
+            "minimum_inlier_count": MIN_BALLISTIC_INLIERS,
+            "final_inlier_count": int(np.count_nonzero(fit.inlier_mask)),
+            "reprojection_threshold_px": calculate_inlier_threshold_px(fit.fit_reprojection_errors_px),
+        },
         "gravity_mps2": float(fit.gravity),
         "x0_m": float(fit.x0),
         "vx_mps": float(fit.vx),

@@ -3,7 +3,15 @@ import numpy as np
 
 GRAVITY = 9.81
 SPORTS_BALL_CLASS_ID = 32
-PENALTY_SPOT_WORLD = np.array([0.0, 11.0, 0.0], dtype=np.float64)
+BALL_RADIUS_M = 0.11
+
+# Keep the physical ground reference separate from the reconstructed ball
+# centre.  2D kick detection projects a bounding-box foot to the ground,
+# whereas triangulation and trajectory playback use the ball centre.
+PENALTY_SPOT_GROUND_WORLD = np.array([0.0, 11.0, 0.0], dtype=np.float64)
+PENALTY_SPOT_BALL_CENTER_WORLD = np.array(
+    [0.0, 11.0, BALL_RADIUS_M], dtype=np.float64
+)
 FIELD_X_LIMITS = (-15.0, 15.0)
 FIELD_Y_LIMITS = (-5.0, 25.0)
 GOAL_LINE_Y = 0.0

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from scipy.optimize import least_squares
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -317,6 +318,60 @@ def refine_pose(object_points, image_points, camera_matrix, dist_coeffs, rvec, t
     return rvec, tvec
 
 
+def refine_pose_robust(object_points, image_points, camera_matrix, dist_coeffs, rvec, tvec):
+    """Refine a pose against every reference point without letting one bad click dominate."""
+    focal_px = max(float(np.mean([camera_matrix[0, 0], camera_matrix[1, 1]])), 1.0)
+    initial_projected = project_points(object_points, rvec, tvec, camera_matrix, dist_coeffs)
+    initial_errors = np.linalg.norm(initial_projected - image_points, axis=1) / focal_px
+    median = float(np.median(initial_errors))
+    mad_scale = 1.4826 * float(np.median(np.abs(initial_errors - median)))
+    # Image-plane angular residual makes the loss independent of resolution
+    # and focal length. One pixel is only a numerical quantisation floor.
+    angular_scale = max(1.0 / focal_px, mad_scale)
+
+    def residuals(values):
+        projected = project_points(
+            object_points,
+            values[:3].reshape(3, 1),
+            values[3:].reshape(3, 1),
+            camera_matrix,
+            dist_coeffs,
+        )
+        return ((projected - image_points) / focal_px).ravel()
+
+    initial = np.concatenate([np.asarray(rvec, dtype=np.float64).reshape(3),
+                              np.asarray(tvec, dtype=np.float64).reshape(3)])
+    try:
+        result = least_squares(
+            residuals,
+            initial,
+            loss="soft_l1",
+            f_scale=angular_scale,
+            max_nfev=200,
+        )
+        return result.x[:3].reshape(3, 1), result.x[3:].reshape(3, 1)
+    except (ValueError, np.linalg.LinAlgError, cv2.error):
+        return rvec, tvec
+
+
+def pose_robust_score(object_points, image_points, camera_matrix, dist_coeffs, rvec, tvec):
+    """Rank pose hypotheses using all points in angular, robust error space."""
+    projected, errors_px = compute_reprojection_errors(
+        object_points, image_points, rvec, tvec, camera_matrix, dist_coeffs)
+    del projected
+    focal_px = max(float(np.mean([camera_matrix[0, 0], camera_matrix[1, 1]])), 1.0)
+    errors = errors_px / focal_px
+    median = float(np.median(errors))
+    mad_scale = 1.4826 * float(np.median(np.abs(errors - median)))
+    scale = max(1.0 / focal_px, mad_scale)
+    normalized = errors / scale
+    # Pseudo-Huber keeps the score smooth while limiting a bad manual point.
+    loss = np.sqrt(1.0 + normalized ** 2) - 1.0
+    camera_center = -cv2.Rodrigues(rvec)[0].T @ tvec.reshape(3)
+    behind_goal_penalty = 1e3 if float(camera_center[1]) < 0.0 else 0.0
+    return float(np.mean(loss) + 0.25 * np.percentile(loss, 75) + behind_goal_penalty)
+
+
 def try_solve_pnp_ransac(object_points, image_points, camera_matrix, dist_coeffs, flag, solver_name, reprojection_error):
     try:
         ok, rvec, tvec, inliers = cv2.solvePnPRansac(
@@ -356,6 +411,7 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
     if hasattr(cv2, "SOLVEPNP_SQPNP"):
         methods.append((cv2.SOLVEPNP_SQPNP, "solvePnPRansac(SQPNP)", 6.0))
 
+    ransac_candidates = []
     for flag, solver_name, reprojection_error in methods:
         result = try_solve_pnp_ransac(
             object_points,
@@ -367,7 +423,43 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
             reprojection_error,
         )
         if result is not None:
-            return result
+            ransac_candidates.append(result)
+
+    if ransac_candidates:
+        # RANSAC proposes hypotheses only.  Evaluate every proposal against
+        # every reference point and robustly refine it before committing a
+        # runtime pose; returning the first successful proposal is order
+        # dependent and can preserve a local, low-support solution.
+        evaluated = []
+        for candidate in ransac_candidates:
+            for suffix, rvec, tvec in (
+                ("", candidate["rvec"], candidate["tvec"]),
+                (" + robust all-points refine", *refine_pose_robust(
+                    object_points,
+                    image_points,
+                    camera_matrix,
+                    dist_coeffs,
+                    candidate["rvec"],
+                    candidate["tvec"],
+                )),
+            ):
+                evaluated.append({
+                    "solver_name": candidate["solver_name"] + suffix,
+                    "rvec": rvec,
+                    "tvec": tvec,
+                    "inliers": candidate["inliers"],
+                })
+        return min(
+            evaluated,
+            key=lambda item: pose_robust_score(
+                object_points,
+                image_points,
+                camera_matrix,
+                dist_coeffs,
+                item["rvec"],
+                item["tvec"],
+            ),
+        )
 
     # RANSAC all failed — try multiple strategies and pick best
     best_result = None
@@ -432,7 +524,31 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
         _try_solve(f"init {name} behind", rvec_init, tvec_init, use_guess=True)
 
     if best_result is not None:
-        return best_result
+        refined_rvec, refined_tvec = refine_pose_robust(
+            object_points,
+            image_points,
+            camera_matrix,
+            dist_coeffs,
+            best_result["rvec"],
+            best_result["tvec"],
+        )
+        refined_result = {
+            "solver_name": best_result["solver_name"] + " + robust all-points refine",
+            "rvec": refined_rvec,
+            "tvec": refined_tvec,
+            "inliers": best_result["inliers"],
+        }
+        return min(
+            (best_result, refined_result),
+            key=lambda item: pose_robust_score(
+                object_points,
+                image_points,
+                camera_matrix,
+                dist_coeffs,
+                item["rvec"],
+                item["tvec"],
+            ),
+        )
 
     raise RuntimeError("solvePnPRansac failed and all fallback strategies also failed")
 
