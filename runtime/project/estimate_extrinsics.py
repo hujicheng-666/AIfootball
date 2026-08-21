@@ -1014,7 +1014,7 @@ def choose_tasks(args):
     raise ValueError("Task must be one of: left / right / all / custom")
 
 
-def process_task(meta):
+def process_task(meta, enable_line_refinement=False):
     image_path = Path(meta["image_path"])
     if not image_path.exists():
         raise FileNotFoundError(f"Failed to read image: {image_path}")
@@ -1059,19 +1059,28 @@ def process_task(meta):
     inliers = result["inliers"]
     solver_name = result["solver_name"]
 
-    rvec, tvec, line_refinement, line_constraints = refine_pose_with_line_constraints(
-        image,
-        meta["view_type"],
-        point_names,
-        object_points,
-        image_points,
-        working_camera_matrix,
-        intrinsics_bundle.dist_coeffs,
-        rvec,
-        tvec,
-    )
-    if line_refinement["accepted"]:
-        solver_name += " + automatic line refinement"
+    line_constraints = []
+    line_refinement = {
+        "enabled": bool(enable_line_refinement),
+        "accepted": False,
+        "reason": "disabled; using seven-point robust PnP only",
+        "detected_line_count": 0,
+        "lines": [],
+    }
+    if enable_line_refinement:
+        rvec, tvec, line_refinement, line_constraints = refine_pose_with_line_constraints(
+            image,
+            meta["view_type"],
+            point_names,
+            object_points,
+            image_points,
+            working_camera_matrix,
+            intrinsics_bundle.dist_coeffs,
+            rvec,
+            tvec,
+        )
+        if line_refinement["accepted"]:
+            solver_name += " + automatic line refinement"
 
     projected_points, errors = compute_reprojection_errors(
         object_points, image_points, rvec, tvec, working_camera_matrix, intrinsics_bundle.dist_coeffs
@@ -1238,6 +1247,11 @@ def parse_args():
         dest="install_calib",
         help="After both cameras succeed, atomically install runtime calibration files into this directory",
     )
+    parser.add_argument(
+        "--enable-line-refinement",
+        action="store_true",
+        help="Experimental: refine the seven-point PnP result with automatically detected field lines.",
+    )
     return parser.parse_args()
 
 
@@ -1275,7 +1289,7 @@ def main():
     summary = []
 
     for meta in tasks:
-        result = process_task(meta)
+        result = process_task(meta, enable_line_refinement=args.enable_line_refinement)
         if result is not None:
             summary.append(result)
 
