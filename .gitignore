@@ -43,6 +43,17 @@ runtime/data/wpf-bridge-debug.txt
 # --- 重建/检测中间缓存（重跑可复用，不入库）---
 output/track_cache/
 
+# --- 本地生成结果 / 运行数据（README 明确不作为源码提交）---
+/output/
+/calib/
+/data/
+/Myproject/
+/top/
+/runtime/output/
+/runtime/calib/
+/runtime/data/
+/runtime/samples/
+
 # --- Local git/debug helper snapshots ---
 _git*.txt
 _git*.log
