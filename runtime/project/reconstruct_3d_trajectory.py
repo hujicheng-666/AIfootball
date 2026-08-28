@@ -37,7 +37,14 @@ YOLO_MODEL_PATH = Path(os.environ.get("YOLO_MODEL_PATH", WORKSPACE_DIR / "models
 WORLD_Z_LIMITS = (-1.0, 8.0)
 # 相机语义由样本目录决定：left/ 中的视频对应 left 标定，right/ 对应 right 标定。
 DEFAULT_IMGSZ = 1280
+# The ball spans only ~37 px on screen, far smaller than the detection
+# resolution; a fast ball currently triggers a 960-px inference (~1.1 s/frame
+# on CPU).  Capping the inference size to 640 cuts that to ~0.52 s (~2.1x)
+# with negligible localisation loss.  The crop window is kept large so the
+# fast-moving ball does not leave the search region.
+DETECT_IMGSZ_CAP = 640
 DEFAULT_CONF = 0.15
+MAX_TRACK_CANDIDATES = 4
 
 
 @dataclass
@@ -65,6 +72,8 @@ class VideoTrack:
     times: np.ndarray
     image_points: np.ndarray
     confidences: np.ndarray
+    center_covariances: np.ndarray
+    path_diagnostics: dict
 
 
 @dataclass
@@ -87,6 +96,7 @@ class Trajectory3D:
     confidences_left: np.ndarray
     confidences_right: np.ndarray
     offset_seconds: float
+    alignment_metrics: dict
 
 
 def load_camera_configs():
@@ -159,7 +169,55 @@ def image_point_to_ground_world(image_point, config, ground_z=0.0):
     return config.camera_center_world + scale * ray_world
 
 
-def rank_detections(boxes, expected_center, penalty_center, max_candidates=3):
+def estimate_box_center_covariance(bbox, confidence):
+    """Conservative pixel covariance for a YOLO ball centre measurement."""
+    x1, y1, x2, y2 = [float(value) for value in bbox]
+    width = max(x2 - x1, 1.0)
+    height = max(y2 - y1, 1.0)
+    # Bounding-box scale is a proxy for the visible ball radius.  Low
+    # confidence and elongated boxes inflate the uncertainty rather than
+    # pretending every detector centre is equally precise.
+    anisotropy = max(width, height) / min(width, height)
+    confidence_factor = 1.0 + 1.5 * (1.0 - float(np.clip(confidence, 0.0, 1.0)))
+    sigma_x = max(0.75, 0.12 * width * confidence_factor * np.sqrt(anisotropy))
+    sigma_y = max(0.75, 0.12 * height * confidence_factor * np.sqrt(anisotropy))
+    return np.diag([sigma_x * sigma_x, sigma_y * sigma_y]).astype(np.float64)
+
+
+def center_covariance_log_area(covariance):
+    covariance = np.asarray(covariance, dtype=np.float64).reshape(2, 2)
+    determinant = max(float(np.linalg.det(covariance)), 1e-9)
+    return float(np.log(determinant))
+
+
+def regularize_center_covariance(covariance):
+    """Return a finite positive-definite 2D pixel covariance.
+
+    Covariances are propagated through linear time interpolation, so this
+    guard is deliberately data-independent: it only removes numerical
+    degeneracy and never encodes sample-specific tolerances.
+    """
+    covariance = np.asarray(covariance, dtype=np.float64).reshape(2, 2)
+    covariance = 0.5 * (covariance + covariance.T)
+    if not np.all(np.isfinite(covariance)):
+        return np.eye(2, dtype=np.float64) * 9.0
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    eigenvalues = np.clip(eigenvalues, 0.25 ** 2, 64.0 ** 2)
+    return (eigenvectors * eigenvalues) @ eigenvectors.T
+
+
+def whiten_pixel_residuals(residuals, covariances):
+    """Whiten Nx2 pixel residuals using their measurement covariances."""
+    residuals = np.asarray(residuals, dtype=np.float64).reshape(-1, 2)
+    covariances = np.asarray(covariances, dtype=np.float64).reshape(-1, 2, 2)
+    whitened = np.empty_like(residuals)
+    for index, residual in enumerate(residuals):
+        cholesky = np.linalg.cholesky(regularize_center_covariance(covariances[index]))
+        whitened[index] = np.linalg.solve(cholesky, residual)
+    return whitened
+
+
+def rank_detections(boxes, expected_center, penalty_center, max_candidates=MAX_TRACK_CANDIDATES):
     ranked = []
     MIN_CONF = 0.08   # absolute minimum confidence to even consider a detection
     MAX_AREA = 20000  # reject unrealistically large boxes
@@ -186,6 +244,7 @@ def rank_detections(boxes, expected_center, penalty_center, max_candidates=3):
             "bbox": [x1, y1, x2, y2],
             "center": center,
             "foot": foot,
+            "center_covariance": estimate_box_center_covariance([x1, y1, x2, y2], conf),
         }))
 
     ranked.sort(key=lambda item: item[0], reverse=True)
@@ -249,69 +308,80 @@ def smooth_points(points, window=7):
 
 def _refine_ball_center(frame, x1, y1, x2, y2, orig_center):
     """Refine ball center within YOLO bbox using color segmentation.
-    Footballs are mostly white → HSV threshold finds precise contour centroid."""
+
+    Footballs are mostly white and must appear as a small, highly circular
+    white blob near the bbox centre.  The scene also contains many white /
+    non-green objects (player shirts, goal net lines, pitch lines, distant
+    clutter), so the old "white OR NOT-green" mask is not used -- it absorbed
+    large non-green regions and snapped the ball centre onto a shirt or the
+    net.  Instead only the low-saturation/high-value white mask is kept and the
+    blob must pass circularity, area-ratio and centre-proximity checks; if no
+    trustworthy round blob is found we return None so the caller keeps the YOLO
+    centre rather than being dragged onto an unrelated white object.
+    """
     try:
         x1i, y1i = max(0, int(x1)), max(0, int(y1))
         x2i, y2i = min(frame.shape[1], int(x2)), min(frame.shape[0], int(y2))
         if x2i - x1i < 4 or y2i - y1i < 4:
             return None
 
+        bw = float(x2i - x1i)
+        bh = float(y2i - y1i)
         roi = frame[y1i:y2i, x1i:x2i]
         hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-        # White ball: low saturation, high value
+        # White ball only (low saturation, high value).  Do not OR in the
+        # non-green complement -- that absorbed shirts / net / clutter.
         mask = cv2.inRange(hsv, np.array([0, 0, 160]), np.array([180, 60, 255]))
-
-        # Also try green-field mask for ball-on-grass contrast (inverse)
-        mask_green = cv2.inRange(hsv, np.array([35, 40, 40]), np.array([85, 255, 255]))
-        mask_ball = cv2.bitwise_or(mask, cv2.bitwise_not(mask_green))
-
-        # Find contours in ball mask
-        contours, _ = cv2.findContours(mask_ball, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         if not contours:
             return None
 
-        # Pick largest contour near bbox center
-        bcx, bcy = (x1 + x2) / 2 - x1i, (y1 + y2) / 2 - y1i
+        bcx, bcy = bw * 0.5, bh * 0.5
         best_contour = None
-        best_score = -1
+        best_score = -1.0
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area < 3:  # too small
+            if area < 4.0:  # too small
                 continue
             M = cv2.moments(cnt)
             if M["m00"] < 1e-6:
                 continue
             cx_c = M["m10"] / M["m00"]
             cy_c = M["m01"] / M["m00"]
-            # Score: area - distance from bbox center
-            dist = np.hypot(cx_c - bcx, cy_c - bcy)
-            circularity = 4 * np.pi * area / (cv2.arcLength(cnt, True) ** 2 + 1e-6)
-            score = area * min(circularity, 1.0) - dist * 2.0
+            circularity = 4.0 * np.pi * area / (cv2.arcLength(cnt, True) ** 2 + 1e-6)
+            if circularity < 0.62:  # a ball is nearly circular
+                continue
+            area_ratio = area / (bw * bh + 1e-6)
+            if area_ratio < 0.04 or area_ratio > 0.85:  # shirt/net fills the box
+                continue
+            dist_norm = np.hypot((cx_c - bcx) / max(bw * 0.5, 1.0),
+                                 (cy_c - bcy) / max(bh * 0.5, 1.0))
+            if dist_norm > 0.55:  # blob must be near the box centre
+                continue
+            # Score favours a round blob that fills a sensible part of the box.
+            score = circularity * area_ratio - 0.4 * dist_norm
             if score > best_score:
                 best_score = score
-                best_contour = (cx_c, cy_c)
+                radial_scale = max(np.sqrt(area / np.pi), 1.0)
+                contour_covariance = np.array([
+                    [M["mu20"] / M["m00"], M["mu11"] / M["m00"]],
+                    [M["mu11"] / M["m00"], M["mu02"] / M["m00"]],
+                ], dtype=np.float64)
+                contour_covariance = 0.5 * (contour_covariance + contour_covariance.T)
+                inflation = 0.18 * (1.0 + max(0.0, 1.0 - circularity))
+                measurement_covariance = contour_covariance * inflation * inflation
+                measurement_covariance += np.eye(2, dtype=np.float64) * max(0.50, 0.12 * radial_scale) ** 2
+                best_contour = (cx_c, cy_c, measurement_covariance)
 
         if best_contour is not None:
-            return np.array([best_contour[0] + x1i, best_contour[1] + y1i], dtype=np.float64)
+            return (
+                np.array([best_contour[0] + x1i, best_contour[1] + y1i], dtype=np.float64),
+                best_contour[2],
+            )
     except Exception as exc:
         print(f"[refine] 颜色分割细化失败: {exc}", file=sys.stderr)
     return None
-
-
-def _csrt_bbox_to_detection(bbox_tuple, frame_w, frame_h):
-    """Convert CSRT tracker bounding box to the detection dict format used downstream."""
-    x, y, w, h = [float(v) for v in bbox_tuple]
-    x1, y1 = x, y
-    x2, y2 = x + w, y + h
-    center = np.array([(x1 + x2) * 0.5, (y1 + y2) * 0.5], dtype=np.float64)
-    foot = np.array([(x1 + x2) * 0.5, y2], dtype=np.float64)
-    return {
-        "conf": 0.9,  # high confidence for tracked result
-        "bbox": [x1, y1, x2, y2],
-        "center": center,
-        "foot": foot,
-    }
 
 
 def _crop_around_point(frame, center_xy, crop_size, frame_w, frame_h):
@@ -338,37 +408,6 @@ def _crop_around_point(frame, center_xy, crop_size, frame_w, frame_h):
         crop = cv2.copyMakeBorder(crop, pad_top, pad_bottom, pad_left, pad_right,
                                   cv2.BORDER_CONSTANT, value=(0, 0, 0))
     return crop, (x1, y1)  # offset of crop in original frame
-
-
-def _yolo_detect_on_crop(model, frame, expected_center, penalty_center, imgsz, conf,
-                         frame_w, frame_h):
-    """Crop around expected position and run YOLO, map results back to full frame."""
-    CROP_SIZE = min(640, min(frame_w, frame_h))
-    cropped, (ox, oy) = _crop_around_point(frame, expected_center, CROP_SIZE, frame_w, frame_h)
-
-    # Map penalty center into crop coordinates
-    pc_in_crop = (penalty_center[0] - ox, penalty_center[1] - oy)
-    ec_in_crop = (expected_center[0] - ox, expected_center[1] - oy)
-
-    result = model.predict(cropped, classes=[SPORTS_BALL_CLASS_ID], conf=conf, imgsz=imgsz, verbose=False)[0]
-    boxes = [] if result.boxes is None else list(result.boxes)
-    chosen_in_crop = pick_detection(boxes,
-                                    np.array(ec_in_crop, dtype=np.float64),
-                                    np.array(pc_in_crop, dtype=np.float64))
-
-    if chosen_in_crop is None:
-        return None
-
-    # Map back to full frame coordinates
-    chosen_in_crop["bbox"][0] += ox
-    chosen_in_crop["bbox"][1] += oy
-    chosen_in_crop["bbox"][2] += ox
-    chosen_in_crop["bbox"][3] += oy
-    chosen_in_crop["center"][0] += ox
-    chosen_in_crop["center"][1] += oy
-    chosen_in_crop["foot"][0] += ox
-    chosen_in_crop["foot"][1] += oy
-    return chosen_in_crop
 
 
 def _predict_ball_position(history):
@@ -408,7 +447,7 @@ def _adaptive_ball_detect(model, frame, expected_center, penalty_center, imgsz, 
         crop_size, stage1_conf = 480, conf
 
     crop_size = min(crop_size, min(frame_w, frame_h))
-    stage1_imgsz = min(crop_size, imgsz)
+    stage1_imgsz = min(crop_size, min(imgsz, DETECT_IMGSZ_CAP))
 
     cropped, (ox, oy) = _crop_around_point(frame, expected_center, crop_size, frame_w, frame_h)
     current_crop = cropped  # 默认使用 stage-1 裁剪图；stage-1 失败并放大重试成功后会更新
@@ -430,7 +469,7 @@ def _adaptive_ball_detect(model, frame, expected_center, penalty_center, imgsz, 
         pc2 = (penalty_center[0] - ox2, penalty_center[1] - oy2)
         ec2 = (expected_center[0] - ox2, expected_center[1] - oy2)
         result2 = model.predict(cropped2, classes=[SPORTS_BALL_CLASS_ID],
-                                conf=conf * 0.5, imgsz=min(bigger, imgsz), verbose=False)[0]
+                                conf=conf * 0.5, imgsz=min(bigger, min(imgsz, DETECT_IMGSZ_CAP)), verbose=False)[0]
         boxes2 = [] if result2.boxes is None else list(result2.boxes)
         candidates = rank_detections(boxes2,
                                      np.array(ec2, dtype=np.float64),
@@ -452,7 +491,7 @@ def _adaptive_ball_detect(model, frame, expected_center, penalty_center, imgsz, 
         ecz = (zoom_center[0] - oz, zoom_center[1] - oyz)
 
         result_z = model.predict(cropped_z, classes=[SPORTS_BALL_CLASS_ID],
-                                 conf=conf, imgsz=min(zoom_size, imgsz), verbose=False)[0]
+                                 conf=conf, imgsz=min(zoom_size, min(imgsz, DETECT_IMGSZ_CAP)), verbose=False)[0]
         boxes_z = [] if result_z.boxes is None else list(result_z.boxes)
         zoom_candidates = rank_detections(boxes_z,
                                           np.array(ecz, dtype=np.float64),
@@ -466,15 +505,17 @@ def _adaptive_ball_detect(model, frame, expected_center, penalty_center, imgsz, 
 
     # Refine center using color segmentation within YOLO bbox
     bbox_crop = [chosen["bbox"][0], chosen["bbox"][1], chosen["bbox"][2], chosen["bbox"][3]]
-    refined_center = _refine_ball_center(current_crop,
-                                          bbox_crop[0], bbox_crop[1], bbox_crop[2], bbox_crop[3],
-                                          chosen["center"])
-    if refined_center is not None:
+    refined = _refine_ball_center(current_crop,
+                                  bbox_crop[0], bbox_crop[1], bbox_crop[2], bbox_crop[3],
+                                  chosen["center"])
+    if refined is not None:
+        refined_center, refined_covariance = refined
         dx = refined_center[0] - chosen["center"][0]
         dy = refined_center[1] - chosen["center"][1]
         chosen["center"] = refined_center
         chosen["foot"][0] += dx
         chosen["foot"][1] += dy
+        chosen["center_covariance"] = refined_covariance
 
     # Map back to full frame
     chosen["bbox"][0] += ox
@@ -490,11 +531,188 @@ def _adaptive_ball_detect(model, frame, expected_center, penalty_center, imgsz, 
         full_candidates.append({
             "center": candidate["center"].astype(np.float64) + np.array([ox, oy], dtype=np.float64),
             "conf": float(candidate["conf"]),
+            "center_covariance": np.asarray(candidate["center_covariance"], dtype=np.float64),
         })
     if full_candidates:
         full_candidates[0]["center"] = chosen["center"].copy()
+        full_candidates[0]["center_covariance"] = np.asarray(
+            chosen["center_covariance"], dtype=np.float64
+        )
     chosen["candidates"] = full_candidates
     return chosen
+
+
+def _huber_cost(normalized_residual):
+    """Smooth robust cost for a non-negative, scale-normalised residual."""
+    value = float(abs(normalized_residual))
+    return value * value if value <= 1.0 else 2.0 * value - 1.0
+
+
+def second_order_viterbi(state_rows, times, emission_cost, first_transition_cost,
+                         second_transition_cost):
+    """Find a global path with a second-order motion model.
+
+    Each row contains alternatives for one observation time.  First-order
+    selection cannot distinguish a locally plausible false positive from a
+    track that changes acceleration discontinuously; this dynamic programme
+    carries the two preceding states so the entire sequence participates in
+    every choice.
+    """
+    if not state_rows or any(len(row) == 0 for row in state_rows):
+        return None
+    if len(state_rows) == 1:
+        return [int(np.argmin([emission_cost(state) for state in state_rows[0]]))]
+
+    first_costs = np.full((len(state_rows[0]), len(state_rows[1])), np.inf, dtype=np.float64)
+    first_dt = max(float(times[1] - times[0]), 1e-4)
+    for first_index, first_state in enumerate(state_rows[0]):
+        for second_index, second_state in enumerate(state_rows[1]):
+            first_costs[first_index, second_index] = (
+                emission_cost(first_state)
+                + emission_cost(second_state)
+                + first_transition_cost(first_state, second_state, first_dt)
+            )
+
+    if len(state_rows) == 2:
+        first_index, second_index = np.unravel_index(np.argmin(first_costs), first_costs.shape)
+        return [int(first_index), int(second_index)]
+
+    pair_costs = first_costs
+    parents = [None, None]
+    for row_index in range(2, len(state_rows)):
+        previous_previous_states = state_rows[row_index - 2]
+        previous_states = state_rows[row_index - 1]
+        current_states = state_rows[row_index]
+        dt_previous = max(float(times[row_index - 1] - times[row_index - 2]), 1e-4)
+        dt_current = max(float(times[row_index] - times[row_index - 1]), 1e-4)
+        next_costs = np.full((len(previous_states), len(current_states)), np.inf, dtype=np.float64)
+        parent_indices = np.full((len(previous_states), len(current_states)), -1, dtype=np.int32)
+        for previous_index, previous_state in enumerate(previous_states):
+            for current_index, current_state in enumerate(current_states):
+                best_cost = np.inf
+                best_parent = -1
+                for previous_previous_index, previous_previous_state in enumerate(previous_previous_states):
+                    candidate_cost = (
+                        pair_costs[previous_previous_index, previous_index]
+                        + second_transition_cost(
+                            previous_previous_state,
+                            previous_state,
+                            current_state,
+                            dt_previous,
+                            dt_current,
+                        )
+                    )
+                    if candidate_cost < best_cost:
+                        best_cost = candidate_cost
+                        best_parent = previous_previous_index
+                next_costs[previous_index, current_index] = best_cost + emission_cost(current_state)
+                parent_indices[previous_index, current_index] = best_parent
+        pair_costs = next_costs
+        parents.append(parent_indices)
+
+    previous_index, current_index = np.unravel_index(np.argmin(pair_costs), pair_costs.shape)
+    selected = [-1] * len(state_rows)
+    selected[-2] = int(previous_index)
+    selected[-1] = int(current_index)
+    for row_index in range(len(state_rows) - 1, 1, -1):
+        previous_previous_index = int(parents[row_index][selected[row_index - 1], selected[row_index]])
+        selected[row_index - 2] = previous_previous_index
+    return selected
+
+
+def optimize_detection_path(detections, kick_frame, fps, frame_size):
+    """Globally select one 2D candidate per detected frame using motion continuity."""
+    rows = []
+    row_times = []
+    original_centers = []
+    for detection in detections:
+        chosen = detection["detection"]
+        if chosen is None or detection["frame_idx"] < kick_frame:
+            continue
+        candidates = chosen.get("candidates") or [
+            {
+                "center": chosen["center"],
+                "conf": chosen["conf"],
+                "center_covariance": chosen.get("center_covariance", np.eye(2, dtype=np.float64) * 9.0),
+            }
+        ]
+        normalized = []
+        for candidate in candidates[:MAX_TRACK_CANDIDATES]:
+            center = np.asarray(candidate["center"], dtype=np.float64)
+            if np.all(np.isfinite(center)):
+                covariance = np.asarray(
+                    candidate.get("center_covariance", chosen.get("center_covariance", np.eye(2) * 9.0)),
+                    dtype=np.float64,
+                ).reshape(2, 2)
+                normalized.append({
+                    "center": center,
+                    "conf": max(float(candidate["conf"]), 1e-6),
+                    "center_covariance": covariance,
+                })
+        if not normalized:
+            continue
+        rows.append((detection, normalized))
+        row_times.append((detection["frame_idx"] - kick_frame) / fps)
+        original_centers.append(np.asarray(chosen["center"], dtype=np.float64).copy())
+
+    if len(rows) < 3:
+        return {"enabled": True, "applied": False, "reason": "fewer than three candidate frames"}
+
+    diagonal = float(np.hypot(frame_size[0], frame_size[1]))
+    motion_scale_px = max(8.0, diagonal * 0.008)
+
+    def emission(state):
+        # Absolute confidence remains meaningful even when a row has only one
+        # candidate; the old relative-only score lost this information.
+        return -0.45 * np.log(state["conf"]) + 0.10 * center_covariance_log_area(state["center_covariance"])
+
+    def first_transition(previous, current, dt):
+        frame_displacement = np.linalg.norm(current["center"] - previous["center"])
+        speed_px_per_sec = frame_displacement / dt
+        # A weak guard only rejects implausible detector jumps; acceleration is
+        # evaluated below by the actual second-order state transition.
+        speed_limit = diagonal * fps * 0.12
+        return 0.05 * _huber_cost(frame_displacement / motion_scale_px) + 0.20 * _huber_cost(
+            max(0.0, speed_px_per_sec - speed_limit) / max(speed_limit, 1.0)
+        )
+
+    def second_transition(previous_previous, previous, current, dt_previous, dt_current):
+        predicted = previous["center"] + (
+            previous["center"] - previous_previous["center"]
+        ) * (dt_current / dt_previous)
+        residual = np.linalg.norm(current["center"] - predicted)
+        return 1.25 * _huber_cost(residual / motion_scale_px)
+
+    selected_indices = second_order_viterbi(
+        [row[1] for row in rows], np.asarray(row_times, dtype=np.float64),
+        emission, first_transition, second_transition,
+    )
+    if selected_indices is None:
+        return {"enabled": True, "applied": False, "reason": "Viterbi path unavailable"}
+
+    substitutions = 0
+    for (detection, candidates), selected_index, original_center in zip(rows, selected_indices, original_centers):
+        selected_candidate = candidates[selected_index]
+        chosen = detection["detection"]
+        if np.linalg.norm(selected_candidate["center"] - original_center) > 1e-3:
+            substitutions += 1
+        chosen["center"] = selected_candidate["center"].copy()
+        chosen["conf"] = float(selected_candidate["conf"])
+        chosen["center_covariance"] = selected_candidate["center_covariance"].copy()
+        # Keep the globally selected state first so later cross-view Viterbi
+        # treats it as the primary hypothesis without discarding alternatives.
+        chosen["candidates"] = [selected_candidate] + [
+            candidate for index, candidate in enumerate(candidates) if index != selected_index
+        ]
+
+    return {
+        "enabled": True,
+        "applied": True,
+        "candidate_frames": int(len(rows)),
+        "substituted_frames": int(substitutions),
+        "motion_scale_px": float(motion_scale_px),
+        "model": "second_order_constant_velocity_viterbi",
+    }
 
 
 def _sparse_scan_kick_frame(cap, fps, frame_count, penalty_center, model, config, imgsz, conf):
@@ -527,7 +745,7 @@ def _sparse_scan_kick_frame(cap, fps, frame_count, penalty_center, model, config
             next_report_frame = frame_idx + report_every
 
         result = model.predict(frame, classes=[SPORTS_BALL_CLASS_ID],
-                               conf=conf, imgsz=imgsz, verbose=False)[0]
+                               conf=conf, imgsz=min(imgsz, DETECT_IMGSZ_CAP), verbose=False)[0]
         boxes = [] if result.boxes is None else list(result.boxes)
         chosen = pick_detection(boxes, penalty_center, penalty_center)
         gp = None
@@ -563,7 +781,82 @@ def _sparse_scan_kick_frame(cap, fps, frame_count, penalty_center, model, config
     return kick_frame, history, SPARSE_EVERY, sparse_dets
 
 
+TRACK_CACHE_DIR = WORKSPACE_DIR / "output" / "track_cache"
+
+
+def _track_cache_path(video_path):
+    # Different samples use identically named "recording.mp4", so key the cache
+    # on the sample and camera directory levels as well to avoid collisions.
+    vp = Path(video_path)
+    return TRACK_CACHE_DIR / f"{vp.parent.parent.name}_{vp.parent.name}_{vp.stem}_track.npz"
+
+
+def _track_cache_valid(cache_path, video_path, imgsz, conf):
+    """Cache is valid only while the source video and detection settings match."""
+    if not cache_path.exists() or not Path(video_path).exists():
+        return False
+    try:
+        with np.load(cache_path, allow_pickle=True) as data:
+            if float(data["video_mtime"]) != Path(video_path).stat().st_mtime:
+                return False
+            if int(data["imgsz"]) != int(imgsz) or float(data["conf"]) != float(conf):
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def _load_track_cache(cache_path, video_path, config):
+    with np.load(cache_path, allow_pickle=True) as data:
+        times = np.asarray(data["times"], dtype=np.float64)
+        img = np.asarray(data["image_points"], dtype=np.float64)
+        conf = np.asarray(data["confidences"], dtype=np.float64)
+        cov = np.asarray(data["center_covariances"], dtype=np.float64)
+        kick = int(data["kick_frame"]); fps = float(data["fps"])
+        fw = int(data["frame_w"]); fh = int(data["frame_h"]); fc = int(data["frame_count"])
+    detections = []
+    for i, t in enumerate(times):
+        frame_idx = kick + int(round(t * fps))
+        cand = {"center": img[i].copy(), "conf": float(conf[i]),
+                "center_covariance": cov[i].reshape(2, 2).copy()}
+        detections.append({
+            "frame_idx": frame_idx,
+            "detection": {**cand, "bbox": [0, 0, 1, 1], "foot": img[i].copy(),
+                          "candidates": [cand]},
+            "ground_point": None,
+        })
+    return VideoTrack(video_path=Path(video_path), camera_name=config.name, fps=fps,
+                      frame_count=fc, frame_size=(fw, fh), kick_frame=kick,
+                      detections=detections, times=times, image_points=img,
+                      confidences=conf, center_covariances=cov, path_diagnostics={})
+
+
+def _save_track_cache(cache_path, video_path, track, imgsz, conf):
+    TRACK_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    np.savez(
+        cache_path,
+        times=track.times, image_points=track.image_points,
+        confidences=track.confidences, center_covariances=track.center_covariances,
+        kick_frame=track.kick_frame, fps=track.fps, frame_count=track.frame_count,
+        frame_w=track.frame_size[0], frame_h=track.frame_size[1],
+        video_mtime=Path(video_path).stat().st_mtime, imgsz=int(imgsz), conf=float(conf),
+    )
+
+
 def detect_video_track(video_path, config, model, imgsz, conf):
+    cache_path = _track_cache_path(video_path)
+    if _track_cache_valid(cache_path, video_path, imgsz, conf):
+        try:
+            track = _load_track_cache(cache_path, video_path, config)
+            print(
+                f"  [{config.name}] 命中检测缓存: {cache_path.name} "
+                f"({len(track.times)} points) 跳过 YOLO",
+                flush=True,
+            )
+            return track
+        except Exception as exc:
+            print(f"  [{config.name}] 检测缓存加载失败, 重新检测: {exc}", flush=True)
+
     cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
         raise RuntimeError(f"无法打开视频: {video_path}")
@@ -634,7 +927,21 @@ def detect_video_track(video_path, config, model, imgsz, conf):
             result = model.predict(frame, classes=[SPORTS_BALL_CLASS_ID],
                                    conf=conf, imgsz=min(imgsz, 640), verbose=False)[0]
             boxes = [] if result.boxes is None else list(result.boxes)
-            chosen = pick_detection(boxes, expected_center, penalty_center)
+            fallback_candidates = rank_detections(
+                boxes,
+                np.asarray(expected_center, dtype=np.float64),
+                np.asarray(penalty_center, dtype=np.float64),
+            )
+            chosen = fallback_candidates[0] if fallback_candidates else None
+            if chosen is not None:
+                chosen["candidates"] = [
+                    {
+                        "center": candidate["center"].copy(),
+                        "conf": float(candidate["conf"]),
+                        "center_covariance": np.asarray(candidate["center_covariance"], dtype=np.float64).copy(),
+                    }
+                    for candidate in fallback_candidates
+                ]
 
         # --- process chosen detection ---
         ground_point = None
@@ -665,9 +972,23 @@ def detect_video_track(video_path, config, model, imgsz, conf):
     cap.release()
     print(f"  密集跟踪完成：{frame_count}/{frame_count} 帧，耗时 {time.monotonic() - started_at:.0f}s", flush=True)
 
+    path_diagnostics = optimize_detection_path(
+        detections,
+        kick_frame,
+        fps,
+        (frame_width, frame_height),
+    )
+    if path_diagnostics.get("applied"):
+        print(
+            f"  {config.name} global candidate path: "
+            f"{path_diagnostics['substituted_frames']}/{path_diagnostics['candidate_frames']} frames replaced",
+            flush=True,
+        )
+
     rel_times = []
     image_points = []
     confidences = []
+    center_covariances = []
     for det in detections:
         chosen = det["detection"]
         if chosen is None or det["frame_idx"] < kick_frame:
@@ -675,11 +996,14 @@ def detect_video_track(video_path, config, model, imgsz, conf):
         rel_times.append((det["frame_idx"] - kick_frame) / fps)
         image_points.append(chosen["center"].astype(np.float64))
         confidences.append(float(chosen["conf"]))
+        center_covariances.append(np.asarray(
+            chosen.get("center_covariance", np.eye(2, dtype=np.float64) * 9.0), dtype=np.float64
+        ).reshape(2, 2))
 
     if not image_points:
         raise RuntimeError(f"未在视频中检测到可用的足球 2D 轨迹: {video_path}")
 
-    return VideoTrack(
+    track = VideoTrack(
         video_path=video_path,
         camera_name=config.name,
         fps=fps,
@@ -690,19 +1014,48 @@ def detect_video_track(video_path, config, model, imgsz, conf):
         times=np.asarray(rel_times, dtype=np.float64),
         image_points=np.asarray(image_points, dtype=np.float64),
         confidences=np.asarray(confidences, dtype=np.float64),
+        center_covariances=np.asarray(center_covariances, dtype=np.float64),
+        path_diagnostics=path_diagnostics,
     )
+    try:
+        _save_track_cache(cache_path, video_path, track, imgsz, conf)
+        print(
+            f"  [{config.name}] 已写入检测缓存: {_track_cache_path(video_path).name} "
+            f"({len(track.times)} points)",
+            flush=True,
+        )
+    except Exception as exc:
+        print(f"  [{config.name}] 检测缓存写入失败: {exc}", flush=True)
+    return track
 
 
 def build_track_interpolators(track):
     if len(track.times) < 2:
         return None
+    covariances = np.asarray(track.center_covariances, dtype=np.float64).reshape(-1, 2, 2)
+    if len(covariances) != len(track.times):
+        covariances = np.repeat(np.eye(2, dtype=np.float64)[None, :, :] * 9.0, len(track.times), axis=0)
     return {
         "t_min": float(track.times[0]),
         "t_max": float(track.times[-1]),
         "interp_x": interp1d(track.times, track.image_points[:, 0], kind="linear", bounds_error=False, fill_value=np.nan),
         "interp_y": interp1d(track.times, track.image_points[:, 1], kind="linear", bounds_error=False, fill_value=np.nan),
         "interp_conf": interp1d(track.times, track.confidences, kind="linear", bounds_error=False, fill_value=np.nan),
+        "interp_cov_xx": interp1d(track.times, covariances[:, 0, 0], kind="linear", bounds_error=False, fill_value=np.nan),
+        "interp_cov_xy": interp1d(track.times, covariances[:, 0, 1], kind="linear", bounds_error=False, fill_value=np.nan),
+        "interp_cov_yy": interp1d(track.times, covariances[:, 1, 1], kind="linear", bounds_error=False, fill_value=np.nan),
     }
+
+
+def interpolate_center_covariances(interpolators, times):
+    """Linearly propagate per-frame 2D measurement covariance in time."""
+    times = np.asarray(times, dtype=np.float64)
+    covariances = np.empty((len(times), 2, 2), dtype=np.float64)
+    covariances[:, 0, 0] = interpolators["interp_cov_xx"](times)
+    covariances[:, 0, 1] = interpolators["interp_cov_xy"](times)
+    covariances[:, 1, 0] = covariances[:, 0, 1]
+    covariances[:, 1, 1] = interpolators["interp_cov_yy"](times)
+    return np.asarray([regularize_center_covariance(covariance) for covariance in covariances])
 
 
 def _track_candidates_near_time(track, relative_time, fallback_point, fallback_confidence):
@@ -720,9 +1073,17 @@ def _track_candidates_near_time(track, relative_time, fallback_point, fallback_c
             best_distance = distance
 
     if best is not None and best_distance <= tolerance:
-        candidates = best.get("candidates") or [{"center": best["center"], "conf": best["conf"]}]
-        return candidates[:3]
-    return [{"center": np.asarray(fallback_point, dtype=np.float64), "conf": float(fallback_confidence)}]
+        candidates = best.get("candidates") or [{
+            "center": best["center"],
+            "conf": best["conf"],
+            "center_covariance": best.get("center_covariance", np.eye(2, dtype=np.float64) * 9.0),
+        }]
+        return candidates[:MAX_TRACK_CANDIDATES]
+    return [{
+        "center": np.asarray(fallback_point, dtype=np.float64),
+        "conf": float(fallback_confidence),
+        "center_covariance": np.eye(2, dtype=np.float64) * 9.0,
+    }]
 
 
 def select_cross_view_candidate_path(track_a, config_a, track_b, config_b, times, offset_seconds,
@@ -741,7 +1102,14 @@ def select_cross_view_candidate_path(track_a, config_a, track_b, config_b, times
             for candidate_b in candidates_b:
                 point_a = np.asarray(candidate_a["center"], dtype=np.float64)
                 point_b = np.asarray(candidate_b["center"], dtype=np.float64)
-                tri = triangulate_ball_point(point_a, config_a, point_b, config_b)
+                tri = triangulate_ball_point(
+                    point_a,
+                    config_a,
+                    point_b,
+                    config_b,
+                    candidate_a.get("center_covariance"),
+                    candidate_b.get("center_covariance"),
+                )
                 if tri is None:
                     continue
                 states.append({
@@ -749,6 +1117,8 @@ def select_cross_view_candidate_path(track_a, config_a, track_b, config_b, times
                     "point_b": point_b,
                     "confidence_a": float(candidate_a["conf"]),
                     "confidence_b": float(candidate_b["conf"]),
+                    "covariance_a": np.asarray(candidate_a.get("center_covariance", np.eye(2) * 9.0), dtype=np.float64),
+                    "covariance_b": np.asarray(candidate_b.get("center_covariance", np.eye(2) * 9.0), dtype=np.float64),
                     "world_point": tri["world_point"],
                     "ray_gap": float(tri["ray_gap"]),
                     "reprojection_error": float(tri["reprojection_error"]),
@@ -766,43 +1136,54 @@ def select_cross_view_candidate_path(track_a, config_a, track_b, config_b, times
             prob_a = max(state["confidence_a"] / confidence_mass_a, 1e-6)
             prob_b = max(state["confidence_b"] / confidence_mass_b, 1e-6)
             detection_nll = -np.log(prob_a) - np.log(prob_b)
+            absolute_confidence_nll = -0.20 * np.log(max(state["confidence_a"], 1e-6)) \
+                                      -0.20 * np.log(max(state["confidence_b"], 1e-6))
+            uncertainty_nll = 0.05 * (
+                center_covariance_log_area(state["covariance_a"])
+                + center_covariance_log_area(state["covariance_b"])
+            )
             geometry_nll = (
                 np.log1p(state["ray_gap"] / gap_scale)
                 + 0.5 * np.log1p(state["reprojection_error"] / reproj_scale)
             )
-            state["emission"] = float(detection_nll + geometry_nll)
+            state["emission"] = float(
+                detection_nll + absolute_confidence_nll + uncertainty_nll + geometry_nll
+            )
         state_rows.append(states)
 
-    costs = [np.asarray([state["emission"] for state in state_rows[0]], dtype=np.float64)]
-    parents = [np.full(len(state_rows[0]), -1, dtype=np.int32)]
-    for row_index in range(1, len(state_rows)):
-        previous_states = state_rows[row_index - 1]
-        current_states = state_rows[row_index]
-        dt = max(float(times[row_index] - times[row_index - 1]), 1e-4)
-        current_costs = np.full(len(current_states), np.inf, dtype=np.float64)
-        current_parents = np.full(len(current_states), -1, dtype=np.int32)
-        for current_index, current_state in enumerate(current_states):
-            for previous_index, previous_state in enumerate(previous_states):
-                speed = np.linalg.norm(current_state["world_point"] - previous_state["world_point"]) / dt
-                transition = max(0.0, (speed - 35.0) / 8.0) ** 2
-                candidate_cost = costs[-1][previous_index] + transition
-                if candidate_cost < current_costs[current_index]:
-                    current_costs[current_index] = candidate_cost
-                    current_parents[current_index] = previous_index
-            current_costs[current_index] += current_state["emission"]
-        costs.append(current_costs)
-        parents.append(current_parents)
+    def first_transition(previous, current, dt):
+        speed = np.linalg.norm(current["world_point"] - previous["world_point"]) / dt
+        return 0.15 * _huber_cost(max(0.0, speed - 35.0) / 8.0)
 
-    selected = [int(np.argmin(costs[-1]))]
-    for row_index in range(len(state_rows) - 1, 0, -1):
-        selected.append(int(parents[row_index][selected[-1]]))
-    selected.reverse()
+    def second_transition(previous_previous, previous, current, dt_previous, dt_current):
+        gravity = np.array([0.0, 0.0, -9.81], dtype=np.float64)
+        predicted = previous["world_point"] + (
+            previous["world_point"] - previous_previous["world_point"]
+        ) * (dt_current / dt_previous) + 0.5 * gravity * dt_current * (dt_previous + dt_current)
+        ballistic_residual = np.linalg.norm(current["world_point"] - predicted)
+        speed = np.linalg.norm(current["world_point"] - previous["world_point"]) / dt_current
+        return (
+            1.10 * _huber_cost(ballistic_residual / 0.25)
+            + 0.15 * _huber_cost(max(0.0, speed - 35.0) / 8.0)
+        )
+
+    selected = second_order_viterbi(
+        state_rows,
+        times,
+        lambda state: state["emission"],
+        first_transition,
+        second_transition,
+    )
+    if selected is None:
+        return None
     path = [state_rows[row_index][state_index] for row_index, state_index in enumerate(selected)]
     return (
         np.asarray([state["point_a"] for state in path], dtype=np.float64),
         np.asarray([state["point_b"] for state in path], dtype=np.float64),
         np.asarray([state["confidence_a"] for state in path], dtype=np.float64),
         np.asarray([state["confidence_b"] for state in path], dtype=np.float64),
+        np.asarray([state["covariance_a"] for state in path], dtype=np.float64),
+        np.asarray([state["covariance_b"] for state in path], dtype=np.float64),
     )
 
 
@@ -818,7 +1199,14 @@ def image_point_to_world_ray(image_point, config):
     return config.camera_center_world, ray_world / ray_norm
 
 
-def triangulate_ball_point(image_point_a, config_a, image_point_b, config_b):
+def triangulate_ball_point(image_point_a, config_a, image_point_b, config_b,
+                           covariance_a=None, covariance_b=None):
+    """Triangulate by covariance-weighted nonlinear reprojection minimisation.
+
+    The closest-point ray intersection is retained as a stable geometric
+    initialisation and for its ray-gap diagnostic.  The returned 3D point is
+    then refined in the image domain, where detector uncertainty is meaningful.
+    """
     origin_a, ray_a = image_point_to_world_ray(image_point_a, config_a)
     origin_b, ray_b = image_point_to_world_ray(image_point_b, config_b)
     if origin_a is None or origin_b is None:
@@ -855,6 +1243,38 @@ def triangulate_ball_point(image_point_a, config_a, image_point_b, config_b):
     if not (x_ok and y_ok and z_ok):
         return None
 
+    covariance_a = regularize_center_covariance(
+        np.eye(2, dtype=np.float64) * 9.0 if covariance_a is None else covariance_a)
+    covariance_b = regularize_center_covariance(
+        np.eye(2, dtype=np.float64) * 9.0 if covariance_b is None else covariance_b)
+
+    def residual_vector(candidate):
+        projected_a = project_world_points(candidate.reshape(1, 3), config_a)
+        projected_b = project_world_points(candidate.reshape(1, 3), config_b)
+        residual_a = whiten_pixel_residuals(projected_a - image_point_a, covariance_a[None, :, :])
+        residual_b = whiten_pixel_residuals(projected_b - image_point_b, covariance_b[None, :, :])
+        return np.hstack([residual_a.ravel(), residual_b.ravel()])
+
+    try:
+        result = least_squares(
+            residual_vector,
+            world_point,
+            loss="linear",
+            max_nfev=24,
+        )
+        if result.success and np.all(np.isfinite(result.x)):
+            refined_point = result.x
+            refined_cam_a = config_a.rotation_matrix @ refined_point + config_a.tvec.reshape(3)
+            refined_cam_b = config_b.rotation_matrix @ refined_point + config_b.tvec.reshape(3)
+            if refined_cam_a[2] > 0.0 and refined_cam_b[2] > 0.0:
+                refined_x_ok = FIELD_X_LIMITS[0] - 5.0 <= refined_point[0] <= FIELD_X_LIMITS[1] + 5.0
+                refined_y_ok = FIELD_Y_LIMITS[0] - 5.0 <= refined_point[1] <= FIELD_Y_LIMITS[1] + 5.0
+                refined_z_ok = WORLD_Z_LIMITS[0] <= refined_point[2] <= WORLD_Z_LIMITS[1]
+                if refined_x_ok and refined_y_ok and refined_z_ok:
+                    world_point = refined_point
+    except (ValueError, np.linalg.LinAlgError):
+        pass
+
     reproj_a = project_world_points(world_point.reshape(1, 3), config_a)[0]
     reproj_b = project_world_points(world_point.reshape(1, 3), config_b)[0]
     reproj_error_a = float(np.linalg.norm(reproj_a - image_point_a))
@@ -865,6 +1285,10 @@ def triangulate_ball_point(image_point_a, config_a, image_point_b, config_b):
         "ray_gap": ray_gap,
         "reprojection_error": 0.5 * (reproj_error_a + reproj_error_b),
         "reprojection_errors": [reproj_error_a, reproj_error_b],
+        "normalized_reprojection_error": float(0.5 * (
+            np.linalg.norm(whiten_pixel_residuals((reproj_a - image_point_a).reshape(1, 2), covariance_a[None, :, :]))
+            + np.linalg.norm(whiten_pixel_residuals((reproj_b - image_point_b).reshape(1, 2), covariance_b[None, :, :]))
+        )),
     }
 
 
@@ -945,7 +1369,8 @@ def estimate_joint_reprojection_threshold(errors_px, config_a, config_b):
 
 
 def fit_joint_ballistic_reprojection(times, world_points, image_points_a, image_points_b,
-                                     confidences, config_a, config_b, use_ransac=False):
+                                     confidences, config_a, config_b, use_ransac=False,
+                                     covariances_a=None, covariances_b=None):
     """Fit one gravity trajectory directly to both image tracks for one offset."""
     times = np.asarray(times, dtype=np.float64)
     world_points = np.asarray(world_points, dtype=np.float64)
@@ -963,6 +1388,14 @@ def fit_joint_ballistic_reprojection(times, world_points, image_points_a, image_
         coefficients[0, 2], coefficients[1, 2],
     ], dtype=np.float64)
     point_weights = np.clip(np.sqrt(np.prod(confidences, axis=1)), 0.10, 1.0)
+    if covariances_a is None:
+        covariances_a = np.repeat(np.eye(2, dtype=np.float64)[None, :, :], len(times), axis=0)
+    if covariances_b is None:
+        covariances_b = np.repeat(np.eye(2, dtype=np.float64)[None, :, :], len(times), axis=0)
+    covariances_a = np.asarray([regularize_center_covariance(covariance)
+                                for covariance in covariances_a], dtype=np.float64)
+    covariances_b = np.asarray([regularize_center_covariance(covariance)
+                                for covariance in covariances_b], dtype=np.float64)
 
     def evaluate(params):
         return np.column_stack([
@@ -975,7 +1408,10 @@ def fit_joint_ballistic_reprojection(times, world_points, image_points_a, image_
         predicted = evaluate(params)
         projected_a = project_world_points(predicted, config_a)
         projected_b = project_world_points(predicted, config_b)
-        residuals = np.hstack([projected_a - image_points_a, projected_b - image_points_b])
+        residuals = np.hstack([
+            whiten_pixel_residuals(projected_a - image_points_a, covariances_a),
+            whiten_pixel_residuals(projected_b - image_points_b, covariances_b),
+        ])
         return (residuals[indices] * np.sqrt(point_weights[indices])[:, None]).ravel()
 
     lower = np.array([-15.0, -45.0, -20.0, -65.0, -1.0, -25.0])
@@ -995,7 +1431,7 @@ def fit_joint_ballistic_reprojection(times, world_points, image_points_a, image_
                 np.clip(seed, lower, upper),
                 bounds=(lower, upper),
                 loss="soft_l1",
-                f_scale=8.0,
+                f_scale=2.5,
                 max_nfev=max_nfev,
             ).x
         except (ValueError, np.linalg.LinAlgError):
@@ -1040,12 +1476,15 @@ def fit_joint_ballistic_reprojection(times, world_points, image_points_a, image_
     return predicted, errors, int(np.count_nonzero(errors <= final_threshold)), params
 
 
-def refine_joint_time_offset(times, image_points_a, confidences_a, interp_b, config_a, config_b,
-                             initial_offset, initial_params, max_offset_step):
+def refine_joint_time_offset(times, image_points_a, confidences_a, covariances_a,
+                             interp_b, config_a, config_b, initial_offset, initial_params,
+                             max_offset_step):
     """Continuously refine offset and gravity parameters in the pixel domain."""
     times = np.asarray(times, dtype=np.float64)
     image_points_a = np.asarray(image_points_a, dtype=np.float64)
     confidences_a = np.asarray(confidences_a, dtype=np.float64)
+    covariances_a = np.asarray([regularize_center_covariance(covariance)
+                                for covariance in covariances_a], dtype=np.float64)
     tau = times - float(times[0])
     lower = np.array([-15.0, -45.0, -20.0, -65.0, -1.0, -25.0, initial_offset - max_offset_step])
     upper = np.array([15.0, 45.0, 20.0, 25.0, 8.0, 25.0, initial_offset + max_offset_step])
@@ -1058,6 +1497,7 @@ def refine_joint_time_offset(times, image_points_a, confidences_a, interp_b, con
             interp_b["interp_y"](times + offset),
         ])
         confidences_b = interp_b["interp_conf"](times + offset)
+        covariances_b = interpolate_center_covariances(interp_b, times + offset)
         valid = np.all(np.isfinite(image_points_b), axis=1) & np.isfinite(confidences_b)
         if np.count_nonzero(valid) < 6:
             return np.full(len(times) * 4, 1e4, dtype=np.float64)
@@ -1068,7 +1508,10 @@ def refine_joint_time_offset(times, image_points_a, confidences_a, interp_b, con
         ])
         projected_a = project_world_points(predicted, config_a)
         projected_b = project_world_points(predicted, config_b)
-        residuals = np.hstack([projected_a - image_points_a, projected_b - image_points_b])
+        residuals = np.hstack([
+            whiten_pixel_residuals(projected_a - image_points_a, covariances_a),
+            whiten_pixel_residuals(projected_b - image_points_b, covariances_b),
+        ])
         weights = np.clip(np.sqrt(confidences_a * confidences_b), 0.10, 1.0)
         residuals = residuals * np.sqrt(weights)[:, None]
         residuals[~valid] = 1e4
@@ -1081,12 +1524,144 @@ def refine_joint_time_offset(times, image_points_a, confidences_a, interp_b, con
             np.clip(initial, lower, upper),
             bounds=(lower, upper),
             loss="soft_l1",
-            f_scale=8.0,
+            f_scale=2.5,
             max_nfev=80,
         )
         return float(result.x[6])
     except (ValueError, np.linalg.LinAlgError):
         return float(initial_offset)
+
+
+def joint_ballistic_normalized_nll(predicted_points, image_points_a, image_points_b,
+                                   covariances_a, covariances_b, config_a, config_b):
+    """Robust image-domain likelihood of one predicted 3D flight segment."""
+    normalized_errors = 0.5 * (
+        np.linalg.norm(whiten_pixel_residuals(
+            project_world_points(predicted_points, config_a) - image_points_a,
+            covariances_a,
+        ), axis=1)
+        + np.linalg.norm(whiten_pixel_residuals(
+            project_world_points(predicted_points, config_b) - image_points_b,
+            covariances_b,
+        ), axis=1)
+    )
+    return float(np.mean([_huber_cost(error / 2.5) for error in normalized_errors]))
+
+
+def _evaluate_gravity_parameters(params, times, time_origin):
+    tau = np.asarray(times, dtype=np.float64) - float(time_origin)
+    return np.column_stack([
+        params[0] + params[1] * tau,
+        params[2] + params[3] * tau,
+        params[4] + params[5] * tau - 0.5 * 9.81 * tau * tau,
+    ])
+
+
+def evaluate_cross_validated_ballistic_alignment(candidate, config_a, config_b):
+    """Validate one globally fitted trajectory on held-out temporal blocks.
+
+    Every fold estimates one gravity trajectory from the other observations
+    and evaluates it on an unseen contiguous block.  Unlike independent
+    window fits, an incorrect offset cannot hide behind a different set of
+    trajectory parameters for each validation block.
+    """
+    metrics = candidate["alignment_metrics"]
+    prefix_length = int(metrics["joint_flight_prefix_points"])
+    if prefix_length < 12:
+        return {
+            "fold_count": 1,
+            "validation_normalized_nll": float(metrics["joint_ballistic_normalized_nll"]),
+            "validation_nll_spread": 0.0,
+            "validation_support_fraction": float(metrics["joint_ballistic_support_fraction"]),
+            "score": float(metrics["joint_ballistic_normalized_nll"]),
+        }
+
+    indices = np.arange(prefix_length)
+    folds = [fold for fold in np.array_split(indices, 3) if len(fold) > 0]
+    validation_nlls = []
+    validation_supports = []
+    for validation_indices in folds:
+        training_mask = np.ones(prefix_length, dtype=bool)
+        training_mask[validation_indices] = False
+        training_indices = indices[training_mask]
+        if len(training_indices) < 8:
+            continue
+        train_times = candidate["times"][training_indices]
+        _, _, _, params = fit_joint_ballistic_reprojection(
+            train_times,
+            candidate["world_points"][training_indices],
+            candidate["image_points_left"][training_indices],
+            candidate["image_points_right"][training_indices],
+            np.column_stack([
+                candidate["confidences_left"][training_indices],
+                candidate["confidences_right"][training_indices],
+            ]),
+            config_a,
+            config_b,
+            covariances_a=candidate["center_covariances_left"][training_indices],
+            covariances_b=candidate["center_covariances_right"][training_indices],
+        )
+        predicted = _evaluate_gravity_parameters(
+            params, candidate["times"][validation_indices], train_times[0])
+        validation_nlls.append(joint_ballistic_normalized_nll(
+            predicted,
+            candidate["image_points_left"][validation_indices],
+            candidate["image_points_right"][validation_indices],
+            candidate["center_covariances_left"][validation_indices],
+            candidate["center_covariances_right"][validation_indices],
+            config_a,
+            config_b,
+        ))
+        train_predicted = _evaluate_gravity_parameters(params, train_times, train_times[0])
+        train_errors = 0.5 * (
+            np.linalg.norm(whiten_pixel_residuals(
+                project_world_points(train_predicted, config_a)
+                - candidate["image_points_left"][training_indices],
+                candidate["center_covariances_left"][training_indices],
+            ), axis=1)
+            + np.linalg.norm(whiten_pixel_residuals(
+                project_world_points(train_predicted, config_b)
+                - candidate["image_points_right"][training_indices],
+                candidate["center_covariances_right"][training_indices],
+            ), axis=1)
+        )
+        median = float(np.median(train_errors))
+        mad = 1.4826 * float(np.median(np.abs(train_errors - median)))
+        threshold = max(1.0, median + 2.8 * mad)
+        validation_predicted_a = project_world_points(predicted, config_a)
+        validation_predicted_b = project_world_points(predicted, config_b)
+        validation_errors = 0.5 * (
+            np.linalg.norm(whiten_pixel_residuals(
+                validation_predicted_a - candidate["image_points_left"][validation_indices],
+                candidate["center_covariances_left"][validation_indices],
+            ), axis=1)
+            + np.linalg.norm(whiten_pixel_residuals(
+                validation_predicted_b - candidate["image_points_right"][validation_indices],
+                candidate["center_covariances_right"][validation_indices],
+            ), axis=1)
+        )
+        validation_supports.append(float(np.mean(validation_errors <= threshold)))
+
+    if not validation_nlls:
+        return {
+            "fold_count": 1,
+            "validation_normalized_nll": float(metrics["joint_ballistic_normalized_nll"]),
+            "validation_nll_spread": 0.0,
+            "validation_support_fraction": float(metrics["joint_ballistic_support_fraction"]),
+            "score": float(metrics["joint_ballistic_normalized_nll"]),
+        }
+
+    nll = float(np.mean(validation_nlls))
+    nll_spread = float(np.percentile(validation_nlls, 75) - np.percentile(validation_nlls, 25))
+    return {
+        "fold_count": int(len(validation_nlls)),
+        "validation_normalized_nll": nll,
+        "validation_nll_spread": nll_spread,
+        "validation_support_fraction": float(np.mean(validation_supports)),
+        # The validation likelihood is primary.  Dispersion only resolves
+        # near-ties, so it cannot make a poorer held-out fit win.
+        "score": nll + 0.02 * nll_spread,
+    }
 
 
 def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_seconds,
@@ -1116,6 +1691,8 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
     finite = np.all(np.isfinite(points_a), axis=1) & np.all(np.isfinite(points_b), axis=1)
     conf_a = interp_a["interp_conf"](times)
     conf_b = interp_b["interp_conf"](times + offset_seconds)
+    cov_a = interpolate_center_covariances(interp_a, times)
+    cov_b = interpolate_center_covariances(interp_b, times + offset_seconds)
 
     if use_multi_hypothesis:
         selected_path = select_cross_view_candidate_path(
@@ -1131,7 +1708,7 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
             conf_b,
         )
         if selected_path is not None:
-            points_a, points_b, conf_a, conf_b = selected_path
+            points_a, points_b, conf_a, conf_b, cov_a, cov_b = selected_path
 
     tri_times = []
     world_points = []
@@ -1140,10 +1717,13 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
     image_points_left = []
     image_points_right = []
     conf_pairs = []
+    covariance_pairs_a = []
+    covariance_pairs_b = []
     for idx in np.where(finite)[0]:
         point_a = points_a[idx]
         point_b = points_b[idx]
-        tri = triangulate_ball_point(point_a, config_a, point_b, config_b)
+        tri = triangulate_ball_point(
+            point_a, config_a, point_b, config_b, cov_a[idx], cov_b[idx])
         if tri is None:
             continue
 
@@ -1154,6 +1734,8 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
         image_points_left.append(point_a)
         image_points_right.append(point_b)
         conf_pairs.append((float(conf_a[idx]), float(conf_b[idx])))
+        covariance_pairs_a.append(cov_a[idx])
+        covariance_pairs_b.append(cov_b[idx])
 
     if len(world_points) < 8:
         return None
@@ -1164,6 +1746,8 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
     image_points_left = np.asarray(image_points_left, dtype=np.float64)
     image_points_right = np.asarray(image_points_right, dtype=np.float64)
     confidences = np.asarray(conf_pairs, dtype=np.float64)
+    center_covariances_a = np.asarray(covariance_pairs_a, dtype=np.float64)
+    center_covariances_b = np.asarray(covariance_pairs_b, dtype=np.float64)
 
     # A valid time offset must explain the *same ball centre* in both images.
     # Ray separation alone is insufficient: with an imperfect calibration it can
@@ -1174,7 +1758,7 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
         np.asarray(tri_times, dtype=np.float64), world_points)
     joint_prefix_length = select_alignment_flight_prefix_length(
         np.asarray(tri_times, dtype=np.float64), world_points)
-    _, joint_reprojection_errors, joint_inlier_count, joint_params = fit_joint_ballistic_reprojection(
+    joint_predicted, joint_reprojection_errors, joint_inlier_count, joint_params = fit_joint_ballistic_reprojection(
         np.asarray(tri_times[:joint_prefix_length], dtype=np.float64),
         world_points[:joint_prefix_length],
         image_points_left[:joint_prefix_length],
@@ -1183,31 +1767,58 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
         config_a,
         config_b,
         use_ransac=use_pixel_ransac,
+        covariances_a=center_covariances_a[:joint_prefix_length],
+        covariances_b=center_covariances_b[:joint_prefix_length],
     )
     gap_median, gap_p75, gap_p90 = np.percentile(ray_gaps, [50, 75, 90])
     reproj_median, reproj_p75, reproj_p90 = np.percentile(reprojection_errors, [50, 75, 90])
     joint_reproj_median, joint_reproj_p75, joint_reproj_p90 = np.percentile(
         joint_reprojection_errors, [50, 75, 90])
+    # This is the negative log-likelihood proxy of a *single gravity arc* in
+    # both images.  Unlike ray gap, it cannot be improved merely by pairing
+    # points that are locally close but belong to different flight instants.
+    joint_ballistic_nll = joint_ballistic_normalized_nll(
+        joint_predicted,
+        image_points_left[:joint_prefix_length],
+        image_points_right[:joint_prefix_length],
+        center_covariances_a[:joint_prefix_length],
+        center_covariances_b[:joint_prefix_length],
+        config_a,
+        config_b,
+    )
     accel_p90 = float(np.percentile(accel, 90)) if len(accel) else 0.0
+    support_fraction = float(joint_inlier_count) / max(float(joint_prefix_length), 1.0)
+    # Time alignment is a model-selection problem: select the offset that has
+    # the best robust likelihood under one physically valid flight, rather
+    # than the offset with the smallest local ray separation.  The two weak
+    # terms only resolve near-equal likelihoods in favour of broader support
+    # and a smoother triangulated seed; they cannot override a worse arc.
     score = (
-        float(gap_median)
-        + 0.35 * float(gap_p75)
-        + 0.15 * float(gap_p90)
-        # Raw triangulation is a geometric safety signal.  The primary pixel
-        # score is the reprojected, physically constrained trajectory.
-        + 0.004 * float(reproj_median)
-        + 0.003 * float(reproj_p75)
-        + 0.002 * float(reproj_p90)
-        + 0.016 * float(joint_reproj_median)
-        + 0.010 * float(joint_reproj_p75)
-        + 0.005 * float(joint_reproj_p90)
-        + 0.05 * accel_p90
-        + 0.05 * ballistic_p75_residual
-        # Support is a fraction of the physical-flight segment, not a raw
-        # count, so clips at different frame rates and durations are judged
-        # on the same basis.
-        - 0.48 * (float(joint_inlier_count) / max(float(joint_prefix_length), 1.0))
-        - 0.03 * float(np.nanmean(confidences))
+        joint_ballistic_nll
+        - 0.02 * support_fraction
+        + 0.002 * ballistic_p75_residual
+        + 0.0005 * accel_p90
+    )
+    # Preserve the pre-experimental synchronisation objective as a stable
+    # baseline.  A learned/weighted alternative is allowed to replace it only
+    # after it proves itself on held-out temporal observations.
+    # Stereo time alignment is fundamentally a geometric problem: the correct
+    # offset places the *same physical ball centre* in both images, so on real
+    # samples the winning offset is the one whose triangulated midpoint
+    # re-projects into both cameras with the smallest error and ray separation.
+    # The earlier score blended in acceleration / ballistic-curve / support /
+    # confidence terms that could reward a smooth but temporally misaligned arc;
+    # those are removed so the alignment objective cannot be bought by prettier
+    # arc statistics.  (joint reprojection is retained as a light geometric tie.)
+    geometric_score = (
+        1.0 * float(gap_median)
+        + 0.30 * float(gap_p75)
+        + 0.10 * float(gap_p90)
+        + 1.0 * float(reproj_median)
+        + 0.40 * float(reproj_p75)
+        + 0.15 * float(reproj_p90)
+        + 0.30 * float(joint_reproj_median)
+        + 0.10 * float(joint_reproj_p75)
     )
 
     return {
@@ -1219,6 +1830,8 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
         "image_points_right": image_points_right,
         "confidences_left": confidences[:, 0],
         "confidences_right": confidences[:, 1],
+        "center_covariances_left": center_covariances_a,
+        "center_covariances_right": center_covariances_b,
         "alignment_metrics": {
             "ray_gap_median_m": float(gap_median),
             "ray_gap_p90_m": float(gap_p90),
@@ -1229,10 +1842,14 @@ def build_triangulation_candidate(track_a, config_a, track_b, config_b, offset_s
             "joint_reprojection_inlier_count": joint_inlier_count,
             "joint_flight_prefix_points": joint_prefix_length,
             "joint_ballistic_params": joint_params,
+            "joint_ballistic_normalized_nll": joint_ballistic_nll,
+            "joint_ballistic_support_fraction": support_fraction,
+            "legacy_geometric_score": geometric_score,
             "acceleration_p90_m": accel_p90,
             "ballistic_p75_residual_m": ballistic_p75_residual,
         },
         "score": score,
+        "geometric_score": geometric_score,
     }
 
 
@@ -1246,30 +1863,61 @@ def find_best_time_offset(track_a, config_a, track_b, config_b):
     interp_a = build_track_interpolators(track_a)
     interp_b = build_track_interpolators(track_b)
 
-    best_offset = None
-    best_candidate = None
-    best_score = None
+    coarse_candidates = []
     for offset in offsets:
         candidate = build_triangulation_candidate(
             track_a, config_a, track_b, config_b, float(offset),
             interp_a=interp_a, interp_b=interp_b)
         if candidate is None:
             continue
-        score = candidate["score"]
-        if best_score is None or score < best_score:
-            best_score = score
-            best_offset = float(offset)
-            best_candidate = candidate
+        coarse_candidates.append((float(offset), candidate))
 
-    if best_candidate is None:
+    if not coarse_candidates:
         raise RuntimeError("无法在双机位之间找到可用的时间对齐结果。")
 
+    # The established geometric objective remains a conservative baseline.
+    # A covariance-aware offset must beat it on unseen temporal observations;
+    # otherwise the baseline is retained.
+    baseline_offset, baseline_candidate = min(
+        coarse_candidates, key=lambda item: item[1]["geometric_score"])
+
+    # A full-flight likelihood cheaply narrows the wide offset search.  The
+    # square-root schedule keeps the cross-validation work bounded while
+    # adapting automatically to camera frame rate and search resolution.
+    shortlist_size = min(
+        len(coarse_candidates),
+        max(7, int(np.ceil(np.sqrt(len(coarse_candidates))))),
+    )
+    shortlisted = sorted(coarse_candidates, key=lambda item: item[1]["score"])[:shortlist_size]
+    if not any(candidate is baseline_candidate for _, candidate in shortlisted):
+        shortlisted.append((baseline_offset, baseline_candidate))
+    for _, candidate in shortlisted:
+        candidate["alignment_metrics"]["cross_validated_consensus"] = evaluate_cross_validated_ballistic_alignment(
+            candidate, config_a, config_b)
+
+    baseline_consensus = baseline_candidate["alignment_metrics"]["cross_validated_consensus"]
+    # On real samples the joint-ballistic cross-validation term dropped the
+    # offset onto a temporally misaligned arc, so the final offset is chosen
+    # purely on stereo geometric alignment (the geometric_score minimiser).  The
+    # cross-validation score is retained only as a diagnostic, not a decision.
+    best_offset, best_candidate = baseline_offset, baseline_candidate
+    selection_mode = "geometric_alignment"
+
     metrics = best_candidate["alignment_metrics"]
+    metrics["time_offset_selection"] = {
+        "mode": selection_mode,
+        "baseline_offset_seconds": float(baseline_offset),
+        "selected_offset_seconds": float(best_offset),
+        "baseline_validation_score": float(baseline_consensus["score"]),
+        "selected_validation_score": float(
+            metrics["cross_validated_consensus"]["score"]),
+    }
     prefix_length = int(metrics["joint_flight_prefix_points"])
     refined_offset = refine_joint_time_offset(
         best_candidate["times"][:prefix_length],
         best_candidate["image_points_left"][:prefix_length],
         best_candidate["confidences_left"][:prefix_length],
+        best_candidate["center_covariances_left"][:prefix_length],
         interp_b,
         config_a,
         config_b,
@@ -1289,13 +1937,24 @@ def find_best_time_offset(track_a, config_a, track_b, config_b):
         use_multi_hypothesis=True,
     )
     if refined_candidate is not None:
-        original_inliers = int(metrics["joint_reprojection_inlier_count"])
-        refined_inliers = int(refined_candidate["alignment_metrics"]["joint_reprojection_inlier_count"])
-        if refined_inliers > original_inliers or (
-                refined_inliers == original_inliers
-                and refined_candidate["score"] <= best_candidate["score"]):
+        refined_metrics = refined_candidate["alignment_metrics"]
+        original_consensus = metrics["cross_validated_consensus"]
+        refined_consensus = evaluate_cross_validated_ballistic_alignment(
+            refined_candidate, config_a, config_b)
+        refined_metrics["cross_validated_consensus"] = refined_consensus
+        # A sub-frame optimisation is accepted only when it does not worsen the
+        # pure stereo geometric alignment (re-projection + ray separation);
+        # the joint-ballistic likelihood is diagnostic only.
+        if float(refined_candidate["geometric_score"]) <= float(best_candidate["geometric_score"]):
             best_offset = refined_offset
             best_candidate = refined_candidate
+            refined_metrics["time_offset_selection"] = {
+                "mode": "geometric_alignment_refined",
+                "baseline_offset_seconds": float(baseline_offset),
+                "selected_offset_seconds": float(best_offset),
+                "baseline_validation_score": float(baseline_consensus["score"]),
+                "selected_validation_score": float(refined_consensus["score"]),
+            }
 
     return best_offset, best_candidate
 
@@ -1393,6 +2052,7 @@ def build_3d_trajectory(track_a, config_a, track_b, config_b):
         confidences_left=confidences_left,
         confidences_right=confidences_right,
         offset_seconds=offset_seconds,
+        alignment_metrics=candidate["alignment_metrics"],
     )
 
 
@@ -1439,10 +2099,23 @@ def write_raw_csv(path, trajectory):
             )
 
 
+def _json_compatible(value):
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+    return value
+
+
 def save_summary(sample_dir, video_tracks, trajectory, output_dir):
     summary = {
         "sample_dir": str(sample_dir),
         "time_offset_seconds": float(trajectory.offset_seconds),
+        "time_alignment": _json_compatible(trajectory.alignment_metrics),
         "num_raw_trajectory_points": int(len(trajectory.raw_times)),
         "num_filtered_trajectory_points": int(len(trajectory.times)),
         "mean_ray_gap_m": float(np.mean(trajectory.ray_gaps)),
@@ -1464,6 +2137,10 @@ def save_summary(sample_dir, video_tracks, trajectory, output_dir):
                 "frame_size": list(track.frame_size),
                 "kick_frame": int(track.kick_frame),
                 "num_detected_points": int(len(track.image_points)),
+                "mean_center_sigma_px": float(np.mean(
+                    np.sqrt(np.maximum(np.trace(track.center_covariances, axis1=1, axis2=2) * 0.5, 0.0))
+                )),
+                "global_path_optimization": track.path_diagnostics,
             }
         )
 

@@ -40,6 +40,9 @@ logs/
 runtime/data/wpf-unity-command.txt
 runtime/data/wpf-bridge-debug.txt
 
+# --- 重建/检测中间缓存（重跑可复用，不入库）---
+output/track_cache/
+
 # --- Local git/debug helper snapshots ---
 _git*.txt
 _git*.log
