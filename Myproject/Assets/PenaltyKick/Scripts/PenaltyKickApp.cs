@@ -197,8 +197,6 @@ namespace PenaltyKickPlatform
             _availableGoalkeepers.AddRange(GoalkeeperData.ListAvailableGoalkeepers(_goalkeepersDir));
 
             string selected = ReadCommandLineOption("--goalkeeper");
-            if (string.IsNullOrEmpty(selected) && _availableGoalkeepers.Count > 0)
-                selected = _availableGoalkeepers[0];
             if (!string.IsNullOrEmpty(selected))
                 SwitchGoalkeeper(selected);
         }
@@ -373,6 +371,12 @@ namespace PenaltyKickPlatform
         }
         private void PlayTrajectory(BallTrajectory trajectory, string displayName, string historyId)
         {
+            if (string.IsNullOrWhiteSpace(_currentGoalkeeperName) || CurrentGoalkeeperData == null)
+            {
+                SetStatus("请先选择门将，再播放轨迹。");
+                return;
+            }
+
             StopAutoReset();
             _trajectoryPlaying = false;
             _goalScored = false;

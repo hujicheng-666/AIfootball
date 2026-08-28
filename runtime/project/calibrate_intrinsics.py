@@ -29,7 +29,13 @@ INTRINSICS_REGISTRY_PATH = OUTPUT_DIR / "intrinsics_registry.json"
 CHECKERBOARD = (9, 6)  # (cols, rows) inner corners
 SQUARE_SIZE = 23.0
 MIN_SELECTED_FRAMES = 10
-MAX_SELECTED_FRAMES = 25
+# Start from every valid view.  Robust rejection below removes only views that
+# demonstrably disagree with the common camera model; it must never reduce the
+# final set below 80% of all valid detections.
+DEFAULT_SELECTION_FRACTION = 1.00
+MIN_RETAINED_FRACTION = 0.80
+MAX_OUTLIER_REJECTION_ROUNDS = 4
+OUTLIER_MAD_SCALE = 3.5
 SCAN_EVERY = 2  # 抽帧扫描：每 N 帧检测一次棋盘格，显著加速 CPU 标定（60fps 视频仍足够密集）
 PROGRESS_REPORT_INTERVAL_SECONDS = 0.5
 CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
@@ -46,6 +52,9 @@ class CalibrationResult:
     image_size: tuple[int, int]
     candidates: list
     selected_candidates: list
+    rejected_candidates: list
+    per_view_errors: list
+    rejection_rounds: int
     rms: float
     mean_error: float
     camera_matrix: np.ndarray
@@ -181,51 +190,55 @@ def compute_candidate_metrics(gray, corners):
     }
 
 
-def score_candidate(candidate, selected_candidates, sharpness_min, sharpness_max):
-    if sharpness_max > sharpness_min:
-        sharpness_score = (candidate["sharpness"] - sharpness_min) / (sharpness_max - sharpness_min)
-    else:
-        sharpness_score = 1.0
-
-    if not selected_candidates:
-        return sharpness_score
-
-    distances = []
-    for other in selected_candidates:
-        center_dist = float(np.linalg.norm(candidate["center_norm"] - other["center_norm"]))
-        area_dist = abs(candidate["area_ratio"] - other["area_ratio"]) * 3.0
-        angle_delta = abs(candidate["angle"] - other["angle"])
-        angle_delta = min(angle_delta, 2.0 * math.pi - angle_delta)
-        angle_dist = angle_delta / math.pi
-        distances.append(center_dist + area_dist + angle_dist)
-
-    diversity_score = min(distances)
-    return 0.55 * diversity_score + 0.45 * sharpness_score
-
-
-def select_best_candidates(candidates, max_selected_frames):
-    if len(candidates) <= max_selected_frames:
+def select_best_candidates(candidates, selection_fraction, max_selected_frames=None):
+    """Keep a diverse majority of valid detections instead of a small fixed cap."""
+    target_count = max(MIN_SELECTED_FRAMES, int(math.ceil(len(candidates) * selection_fraction)))
+    if max_selected_frames is not None:
+        target_count = min(target_count, max_selected_frames)
+    target_count = min(target_count, len(candidates))
+    if len(candidates) <= target_count:
         return candidates
 
     sharpness_values = [item["sharpness"] for item in candidates]
     sharpness_min = min(sharpness_values)
     sharpness_max = max(sharpness_values)
 
-    remaining = candidates[:]
-    remaining.sort(key=lambda item: item["sharpness"], reverse=True)
-    selected = [remaining.pop(0)]
+    # Incrementally maintain each candidate's distance to the selected set.
+    # The previous implementation recomputed every candidate-to-selected
+    # distance on every round, which becomes impractical when retaining 80%
+    # of a long calibration video.
+    centers = np.asarray([item["center_norm"] for item in candidates], dtype=np.float64)
+    areas = np.asarray([item["area_ratio"] for item in candidates], dtype=np.float64)
+    angles = np.asarray([item["angle"] for item in candidates], dtype=np.float64)
+    sharpness = np.asarray(sharpness_values, dtype=np.float64)
+    sharpness_score = (
+        np.ones(len(candidates), dtype=np.float64)
+        if sharpness_max <= sharpness_min
+        else (sharpness - sharpness_min) / (sharpness_max - sharpness_min)
+    )
 
-    while remaining and len(selected) < max_selected_frames:
-        best_index = None
-        best_score = None
+    selected_mask = np.zeros(len(candidates), dtype=bool)
+    first_index = int(np.argmax(sharpness))
+    selected_mask[first_index] = True
+    min_distances = np.full(len(candidates), np.inf, dtype=np.float64)
 
-        for idx, candidate in enumerate(remaining):
-            score = score_candidate(candidate, selected, sharpness_min, sharpness_max)
-            if best_score is None or score > best_score:
-                best_score = score
-                best_index = idx
+    def update_min_distances(selected_index):
+        center_distance = np.linalg.norm(centers - centers[selected_index], axis=1)
+        area_distance = np.abs(areas - areas[selected_index]) * 3.0
+        angle_delta = np.abs(angles - angles[selected_index])
+        angle_distance = np.minimum(angle_delta, 2.0 * math.pi - angle_delta) / math.pi
+        distances = center_distance + area_distance + angle_distance
+        np.minimum(min_distances, distances, out=min_distances)
 
-        selected.append(remaining.pop(best_index))
+    update_min_distances(first_index)
+    while int(np.count_nonzero(selected_mask)) < target_count:
+        scores = 0.55 * min_distances + 0.45 * sharpness_score
+        scores[selected_mask] = -np.inf
+        best_index = int(np.argmax(scores))
+        selected_mask[best_index] = True
+        update_min_distances(best_index)
+
+    selected = [item for idx, item in enumerate(candidates) if selected_mask[idx]]
 
     selected.sort(key=lambda item: item["frame_index"])
     return selected
@@ -354,6 +367,97 @@ def compute_mean_reprojection_error(objpoints, imgpoints, rvecs, tvecs, camera_m
     return total_error / len(objpoints)
 
 
+def compute_per_view_reprojection_errors(objpoints, imgpoints, rvecs, tvecs, camera_matrix, dist_coeffs):
+    """Return one RMS pixel error for every chessboard view.
+
+    A global RMS can hide a small number of blurred, partially occluded, or
+    false-positive boards.  Per-view errors let the calibration reject those
+    frames without assuming a particular video, camera, or sample count.
+    """
+    errors = []
+    for obj, image, rvec, tvec in zip(objpoints, imgpoints, rvecs, tvecs):
+        projected, _ = cv2.projectPoints(obj, rvec, tvec, camera_matrix, dist_coeffs)
+        residual = np.asarray(image, dtype=np.float64).reshape(-1, 2) - projected.reshape(-1, 2)
+        errors.append(float(np.sqrt(np.mean(np.sum(residual * residual, axis=1)))))
+    return np.asarray(errors, dtype=np.float64)
+
+
+def robust_outlier_indices(per_view_errors, min_retained_count):
+    """Select only statistically exceptional views, respecting the retention floor."""
+    errors = np.asarray(per_view_errors, dtype=np.float64)
+    if len(errors) <= min_retained_count:
+        return np.empty(0, dtype=np.int32), float("inf")
+
+    median = float(np.median(errors))
+    mad = float(np.median(np.abs(errors - median)))
+    robust_sigma = 1.4826 * mad
+    if robust_sigma > 1e-9:
+        threshold = median + OUTLIER_MAD_SCALE * robust_sigma
+    else:
+        # A nearly identical error distribution has no meaningful MAD scale;
+        # use a high quantile rather than rejecting arbitrary ties.
+        threshold = float(np.quantile(errors, 0.95))
+
+    candidate_indices = np.flatnonzero(errors > threshold)
+    max_remove = max(0, len(errors) - min_retained_count)
+    if max_remove == 0 or len(candidate_indices) == 0:
+        return np.empty(0, dtype=np.int32), threshold
+    if len(candidate_indices) > max_remove:
+        order = np.argsort(errors[candidate_indices])[::-1]
+        candidate_indices = candidate_indices[order[:max_remove]]
+    return np.asarray(candidate_indices, dtype=np.int32), threshold
+
+
+def robust_calibrate(objp, candidates, img_size, min_retained_count):
+    """Iteratively calibrate and remove only per-view reprojection outliers."""
+    active_candidates = list(candidates)
+    rejected_candidates = []
+    camera_matrix = None
+    dist_coeffs = None
+    rejection_rounds = 0
+
+    for round_index in range(MAX_OUTLIER_REJECTION_ROUNDS + 1):
+        objpoints = [objp.copy() for _ in active_candidates]
+        imgpoints = [item["corners"] for item in active_candidates]
+        flags = cv2.CALIB_USE_INTRINSIC_GUESS if camera_matrix is not None else 0
+        rms, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
+            objpoints,
+            imgpoints,
+            img_size,
+            camera_matrix,
+            dist_coeffs,
+            flags=flags,
+        )
+        per_view_errors = compute_per_view_reprojection_errors(
+            objpoints, imgpoints, rvecs, tvecs, camera_matrix, dist_coeffs
+        )
+        rejected_indices, threshold = robust_outlier_indices(per_view_errors, min_retained_count)
+        print(
+            f"  Robust round {round_index + 1}: {len(active_candidates)} views, "
+            f"median={np.median(per_view_errors):.4f}px, "
+            f"threshold={threshold:.4f}px, outliers={len(rejected_indices)}"
+        )
+        if len(rejected_indices) == 0 or round_index == MAX_OUTLIER_REJECTION_ROUNDS:
+            return (
+                rms,
+                camera_matrix,
+                dist_coeffs,
+                rvecs,
+                tvecs,
+                active_candidates,
+                rejected_candidates,
+                per_view_errors,
+                rejection_rounds,
+            )
+
+        rejected_set = set(int(index) for index in rejected_indices)
+        rejected_candidates.extend(active_candidates[index] for index in sorted(rejected_set))
+        active_candidates = [item for index, item in enumerate(active_candidates) if index not in rejected_set]
+        rejection_rounds += 1
+
+    raise AssertionError("Unreachable robust calibration state")
+
+
 def save_undistortion_example(sample_frame, camera_matrix, dist_coeffs, profile_name):
     h, w = sample_frame.shape[:2]
     new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(
@@ -372,26 +476,47 @@ def save_undistortion_example(sample_frame, camera_matrix, dist_coeffs, profile_
     print(f"[{profile_name}] Saved undistortion preview images")
 
 
-def calibrate_profile(profile_name, video_path, max_selected_frames):
+def calibrate_profile(profile_name, video_path, selection_fraction, max_selected_frames=None):
     objp = build_object_points()
     candidates, img_size = collect_candidates(video_path)
-    selected_candidates = select_best_candidates(candidates, max_selected_frames)
+    selected_candidates = select_best_candidates(candidates, selection_fraction, max_selected_frames)
 
-    print(f"[{profile_name}] Selected {len(selected_candidates)} frames for calibration")
+    print(
+        f"[{profile_name}] Selected {len(selected_candidates)}/{len(candidates)} valid frames "
+        f"({len(selected_candidates) / len(candidates):.1%}) for calibration"
+    )
     print(f"[{profile_name}] Frame indices: {[item['frame_index'] for item in selected_candidates]}")
 
+    minimum_retained = max(
+        MIN_SELECTED_FRAMES,
+        int(math.ceil(len(candidates) * MIN_RETAINED_FRACTION)),
+    )
+    if len(selected_candidates) < minimum_retained:
+        raise ValueError(
+            f"Initial selection has only {len(selected_candidates)} views, but robust calibration "
+            f"requires at least {minimum_retained} ({MIN_RETAINED_FRACTION:.0%} of valid detections). "
+            "Increase --max-selected-frames or omit it."
+        )
+    (
+        rms,
+        camera_matrix,
+        dist_coeffs,
+        rvecs,
+        tvecs,
+        selected_candidates,
+        rejected_candidates,
+        per_view_errors,
+        rejection_rounds,
+    ) = robust_calibrate(objp, selected_candidates, img_size, minimum_retained)
     objpoints = [objp.copy() for _ in selected_candidates]
     imgpoints = [item["corners"] for item in selected_candidates]
-
-    rms, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
-        objpoints,
-        imgpoints,
-        img_size,
-        None,
-        None,
-    )
     mean_error = compute_mean_reprojection_error(
         objpoints, imgpoints, rvecs, tvecs, camera_matrix, dist_coeffs
+    )
+
+    print(
+        f"[{profile_name}] Robust calibration retained {len(selected_candidates)}/{len(candidates)} "
+        f"valid frames; rejected {len(rejected_candidates)} outliers in {rejection_rounds} round(s)"
     )
 
     corners_dir = CORNERS_ROOT_DIR / profile_name
@@ -405,6 +530,9 @@ def calibrate_profile(profile_name, video_path, max_selected_frames):
         image_size=img_size,
         candidates=candidates,
         selected_candidates=selected_candidates,
+        rejected_candidates=rejected_candidates,
+        per_view_errors=per_view_errors.tolist(),
+        rejection_rounds=rejection_rounds,
         rms=float(rms),
         mean_error=float(mean_error),
         camera_matrix=camera_matrix,
@@ -428,6 +556,8 @@ def save_profile_outputs(result):
         source_video=str(result.video_path),
         selected_frame_indices=np.array([item["frame_index"] for item in result.selected_candidates], dtype=np.int32),
         selected_frame_sharpness=np.array([item["sharpness"] for item in result.selected_candidates], dtype=np.float64),
+        per_view_reprojection_errors=np.asarray(result.per_view_errors, dtype=np.float64),
+        rejected_frame_indices=np.array([item["frame_index"] for item in result.rejected_candidates], dtype=np.int32),
     )
 
     summary = {
@@ -436,6 +566,10 @@ def save_profile_outputs(result):
         "image_size": list(result.image_size),
         "num_candidates_total": int(len(result.candidates)),
         "num_selected_frames": int(len(result.selected_candidates)),
+        "num_rejected_outliers": int(len(result.rejected_candidates)),
+        "rejection_rounds": int(result.rejection_rounds),
+        "minimum_retained_fraction": MIN_RETAINED_FRACTION,
+        "per_view_reprojection_error_px": result.per_view_errors,
         "rms": float(result.rms),
         "mean_error": float(result.mean_error),
         "camera_matrix": result.camera_matrix.tolist(),
@@ -450,6 +584,10 @@ def save_profile_outputs(result):
                 "angle": float(item["angle"]),
             }
             for item in result.selected_candidates
+        ],
+        "rejected_outlier_frames": [
+            int(item["frame_index"])
+            for item in result.rejected_candidates
         ],
     }
     with open(summary_path, "w", encoding="utf-8") as f:
@@ -498,6 +636,8 @@ def maybe_write_legacy_copy(results, write_legacy_single):
         source_video=str(result.video_path),
         selected_frame_indices=np.array([item["frame_index"] for item in result.selected_candidates], dtype=np.int32),
         selected_frame_sharpness=np.array([item["sharpness"] for item in result.selected_candidates], dtype=np.float64),
+        per_view_reprojection_errors=np.asarray(result.per_view_errors, dtype=np.float64),
+        rejected_frame_indices=np.array([item["frame_index"] for item in result.rejected_candidates], dtype=np.int32),
     )
     print(f"[{result.profile_name}] Saved legacy intrinsics copy: {legacy_path}")
 
@@ -509,7 +649,18 @@ def parse_args():
         action="append",
         help="Repeatable calibration video spec: profile=path, e.g. --video old=... --video new=...",
     )
-    parser.add_argument("--max-selected-frames", type=int, default=MAX_SELECTED_FRAMES)
+    parser.add_argument(
+        "--selection-fraction",
+        type=float,
+        default=DEFAULT_SELECTION_FRACTION,
+        help="Initial fraction of valid chessboard detections (default: 1.00; robust rejection keeps at least 80%).",
+    )
+    parser.add_argument(
+        "--max-selected-frames",
+        type=int,
+        default=None,
+        help="Optional explicit upper limit; omit to retain the requested selection fraction.",
+    )
     parser.add_argument(
         "--out",
         default=None,
@@ -531,12 +682,21 @@ def main():
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         INTRINSICS_REGISTRY_PATH = OUTPUT_DIR / "intrinsics_registry.json"
     specs = resolve_video_specs(args)
+    if not MIN_RETAINED_FRACTION <= args.selection_fraction <= 1.0:
+        raise ValueError(f"--selection-fraction must be in [{MIN_RETAINED_FRACTION:.2f}, 1].")
+    if args.max_selected_frames is not None and args.max_selected_frames < MIN_SELECTED_FRAMES:
+        raise ValueError(f"--max-selected-frames must be at least {MIN_SELECTED_FRAMES}.")
     results = []
 
     for profile_name, video_path in specs:
         print("\n========================================")
         print(f"Profile: {profile_name}")
-        result = calibrate_profile(profile_name, video_path, args.max_selected_frames)
+        result = calibrate_profile(
+            profile_name,
+            video_path,
+            args.selection_fraction,
+            args.max_selected_frames,
+        )
         save_profile_outputs(result)
         results.append(result)
 

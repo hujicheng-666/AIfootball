@@ -7,6 +7,11 @@ namespace AIfootball.App.Services;
 /// <summary>Python 引擎服务 — 管理与嵌入式 Python 的通信</summary>
 public class PythonEngineService : IPythonEngine
 {
+    // Importing torch/ultralytics can take more than 10 seconds on a cold start.
+    // Keep this separate from normal task timeouts so a usable local environment
+    // is not reported as missing merely because its first import is slow.
+    private const int EnvironmentProbeTimeoutMs = 30000;
+
     private readonly string _baseDir;
     private readonly string _pythonEnvDir;
     private readonly string _pythonExe;
@@ -134,7 +139,7 @@ public class PythonEngineService : IPythonEngine
             // 先异步读取 stdout/stderr，再等待退出，避免输出缓冲填满导致死锁
             var stdoutTask = p.StandardOutput.ReadToEndAsync();
             var stderrTask = p.StandardError.ReadToEndAsync();
-            if (!p.WaitForExit(10000))
+            if (!p.WaitForExit(EnvironmentProbeTimeoutMs))
             {
                 try { p.Kill(entireProcessTree: true); } catch { }
                 return (1, "");

@@ -13,16 +13,13 @@ Unity CSV 列约定（与 Goal.CsvBallCenterToWorld 对应）:
   y = Python X（门将右侧 / 射手左侧）
   z = Python Z（高度）
 """
-import argparse, csv
+import argparse, csv, json
 from pathlib import Path
 from project.config import WORKSPACE as BASE_DIR
+from project.constants import BALL_RADIUS_M
 
 BALLISTIC_ROOT = BASE_DIR / "output" / "trajectory_ballistic"
 UNITY_DATA = BASE_DIR / "data"
-
-# 足球半径（米），确保球心高度不低于此值，球不会陷入地面
-BALL_RADIUS_M = 0.11
-
 
 def convert_sample(name: str):
     p = BALLISTIC_ROOT / name / "ballistic_fit_curve.csv"
@@ -33,6 +30,24 @@ def convert_sample(name: str):
     if not rows:
         print(f"[{name}] 空")
         return
+
+    summary_path = BALLISTIC_ROOT / name / "ballistic_fit_summary.json"
+    if not summary_path.exists():
+        raise RuntimeError(f"[{name}] missing ballistic-fit quality summary: {summary_path}")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    quality_gate = summary.get("quality_gate", {})
+    if not quality_gate.get("export_allowed", False):
+        raise RuntimeError(f"[{name}] ballistic fit is not eligible for Unity export.")
+    if not quality_gate.get("passed", False):
+        print(
+            f"[{name}] warning: exporting {quality_gate.get('mode', 'best_effort')} trajectory "
+            f"with {quality_gate.get('final_inlier_count', 0)}/"
+            f"{quality_gate.get('minimum_inlier_count', 0)} required final inliers."
+        )
+
+    below_ground = [row for row in rows if float(row["fit_z_m"]) < BALL_RADIUS_M - 1e-4]
+    if below_ground:
+        raise RuntimeError(f"[{name}] curve contains {len(below_ground)} ball centres below the ground.")
 
     UNITY_DATA.mkdir(parents=True, exist_ok=True)
     t0 = float(rows[0]["time_sec"])
@@ -45,7 +60,7 @@ def convert_sample(name: str):
             t = float(r["time_sec"]) - t0
             csv_x = r["fit_y_m"]   # Python Y (前) -> Unity CSV x
             csv_y = r["fit_x_m"]   # Python X (右) -> Unity CSV y
-            csv_z = max(float(r["fit_z_m"]), BALL_RADIUS_M)  # 球心不低于半径
+            csv_z = float(r["fit_z_m"])
             w.writerow([f"{t:.6f}", csv_x, csv_y, csv_z])
     print(f"[{name}] -> {out}")
 

@@ -28,7 +28,7 @@ from project.config import WORKSPACE as WORKSPACE_DIR
 from project.reconstruct_3d_trajectory import (
     OUTPUT_ROOT,
     SPORTS_BALL_CLASS_ID,
-    PENALTY_SPOT_WORLD,
+    PENALTY_SPOT_GROUND_WORLD,
     VideoTrack,
     load_camera_configs,
     pick_detection,
@@ -66,7 +66,7 @@ class _CamTracker:
         self.frame_w, self.frame_h = frame_w, frame_h
         if self.config is not None:
             self.penalty_center = project_world_points(
-                PENALTY_SPOT_WORLD.reshape(1, 3), self.config)[0]
+                PENALTY_SPOT_GROUND_WORLD.reshape(1, 3), self.config)[0]
 
     def detect(self, model, frame, imgsz, conf):
         """检测本帧足球；返回 chosen 或 None，并更新预测历史"""

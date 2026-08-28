@@ -16,6 +16,7 @@ public partial class ResultsPage : UserControl
     private MainViewModel? _vm;
     private PipelineViewModel? _pipelineVm;
     private string? _deliveredGoalkeeperName;
+    private bool _hasExplicitGoalkeeperSelection;
     private Process? _unityProcess;
     private CancellationTokenSource? _attachCancellation;
     private Window? _ownerWindow;
@@ -92,11 +93,12 @@ public partial class ResultsPage : UserControl
         }
 
         var pipeline = App.Services.GetService(typeof(IPipelineService)) as IPipelineService;
-        var goalkeeperName = pipeline?.GetGoalkeeperForTrajectory(sample)
-            ?? _pipelineVm?.SelectedGoalkeeper?.Name;
-        SetDeliveredGoalkeeper(goalkeeperName);
+        // Selecting a trajectory starts a new replay context.  A goalkeeper must
+        // be selected explicitly for that context before the replay command is sent.
+        _hasExplicitGoalkeeperSelection = false;
+        SetDeliveredGoalkeeper(null);
 
-        var process = pipeline?.LaunchUnityViewer([sample], goalkeeperName, embedded: true,
+        var process = pipeline?.LaunchUnityViewer([sample], goalkeeperName: null, embedded: true,
             hostWindowHandle: UnityHost.HostHandle);
         if (process is null)
         {
@@ -165,7 +167,11 @@ public partial class ResultsPage : UserControl
     {
         var dialog = new OpenFileDialog { Filter = "轨迹 CSV (*.csv)|*.csv" };
         if (dialog.ShowDialog() == true)
+        {
+            _hasExplicitGoalkeeperSelection = false;
+            SetDeliveredGoalkeeper(null);
             await SendUnityCommandAsync($"csv:{dialog.FileName}");
+        }
     }
 
     private void GenerateShooterProfile_Click(object sender, RoutedEventArgs e)
@@ -212,7 +218,16 @@ public partial class ResultsPage : UserControl
         ShooterProfilePopup.IsOpen = true;
     }
 
-    private async void Replay_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("replay");
+    private async void Replay_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_hasExplicitGoalkeeperSelection)
+        {
+            CommandStatusText.Text = "请先选择门将，再播放轨迹";
+            return;
+        }
+
+        await SendUnityCommandAsync("replay");
+    }
     private async void Reset_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("reset");
     private async void View_Click(object sender, RoutedEventArgs e) => await SendUnityCommandAsync("view");
     private sealed record GoalkeeperChoice(string Key, string Label);
@@ -245,6 +260,7 @@ public partial class ResultsPage : UserControl
             if (_pipelineVm is not null)
                 _pipelineVm.SelectedGoalkeeper = _pipelineVm.Goalkeepers
                     .FirstOrDefault(goalkeeper => goalkeeper.Name == choice.Key);
+            _hasExplicitGoalkeeperSelection = true;
             SetDeliveredGoalkeeper(choice.Key);
             await SendUnityCommandAsync($"goalkeeper:{choice.Key}");
         }
@@ -268,14 +284,13 @@ public partial class ResultsPage : UserControl
     {
         if (e.PropertyName == nameof(PipelineViewModel.SelectedGoalkeeper))
         {
-            _deliveredGoalkeeperName = _pipelineVm?.SelectedGoalkeeper?.Name;
             Dispatcher.InvokeAsync(UpdateSelectedGoalkeeperLabel);
         }
     }
 
     private void UpdateSelectedGoalkeeperLabel()
     {
-        var goalkeeperName = _pipelineVm?.SelectedGoalkeeper?.Name ?? _deliveredGoalkeeperName;
+        var goalkeeperName = _deliveredGoalkeeperName;
         if (string.IsNullOrWhiteSpace(goalkeeperName))
         {
             SelectGoalkeeperButton.Content = "门将：未选择";

@@ -118,7 +118,11 @@ public class PipelineService : IPipelineService
         logProgress?.Report(("开始离线处理...", "info"));
 
         var (code, output, error) = await _engine.RunAsync(
-            scriptPath, args, timeoutMs: 1800000, cancellation: cancellation,
+            // Video reconstruction duration depends on clip length and CPU/GPU
+            // throughput.  It must be cancellable by the user, but must not be
+            // killed by an arbitrary batch-wide wall-clock limit before later
+            // samples reach the ballistic/export stages.
+            scriptPath, args, timeoutMs: Timeout.Infinite, cancellation: cancellation,
             outputReceived: line => logProgress?.Report((line, "output")),
             errorReceived: line => logProgress?.Report((line, "error")));
 

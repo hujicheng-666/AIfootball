@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import shutil
 import sys
 import tempfile
@@ -8,6 +9,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from scipy.optimize import least_squares
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -186,7 +188,7 @@ POINT_LABELS = {
 #   Y: 球门线 y=0, 罚球点 y=11（远离球门为正）
 #   "shooter_left"  = 射门视角左侧照片（左相机，站在场地左侧面向球门）
 #   "shooter_right" = 射门视角右侧照片（右相机，站在场地右侧面向球门）
-#   第6个禁区角：左相机(场地左侧)画面中心偏右 → 点射手视角右侧禁区角；右相机反之
+#   第6个禁区角：左相机(场地左侧)画面中心偏右 → 点射手视角右侧禁区角；右相机反之。
 POINT_ORDERS = {
     "shooter_left": [
         "left_post_bottom",
@@ -317,6 +319,60 @@ def refine_pose(object_points, image_points, camera_matrix, dist_coeffs, rvec, t
     return rvec, tvec
 
 
+def refine_pose_robust(object_points, image_points, camera_matrix, dist_coeffs, rvec, tvec):
+    """Refine a pose against every reference point without letting one bad click dominate."""
+    focal_px = max(float(np.mean([camera_matrix[0, 0], camera_matrix[1, 1]])), 1.0)
+    initial_projected = project_points(object_points, rvec, tvec, camera_matrix, dist_coeffs)
+    initial_errors = np.linalg.norm(initial_projected - image_points, axis=1) / focal_px
+    median = float(np.median(initial_errors))
+    mad_scale = 1.4826 * float(np.median(np.abs(initial_errors - median)))
+    # Image-plane angular residual makes the loss independent of resolution
+    # and focal length. One pixel is only a numerical quantisation floor.
+    angular_scale = max(1.0 / focal_px, mad_scale)
+
+    def residuals(values):
+        projected = project_points(
+            object_points,
+            values[:3].reshape(3, 1),
+            values[3:].reshape(3, 1),
+            camera_matrix,
+            dist_coeffs,
+        )
+        return ((projected - image_points) / focal_px).ravel()
+
+    initial = np.concatenate([np.asarray(rvec, dtype=np.float64).reshape(3),
+                              np.asarray(tvec, dtype=np.float64).reshape(3)])
+    try:
+        result = least_squares(
+            residuals,
+            initial,
+            loss="soft_l1",
+            f_scale=angular_scale,
+            max_nfev=200,
+        )
+        return result.x[:3].reshape(3, 1), result.x[3:].reshape(3, 1)
+    except (ValueError, np.linalg.LinAlgError, cv2.error):
+        return rvec, tvec
+
+
+def pose_robust_score(object_points, image_points, camera_matrix, dist_coeffs, rvec, tvec):
+    """Rank pose hypotheses using all points in angular, robust error space."""
+    projected, errors_px = compute_reprojection_errors(
+        object_points, image_points, rvec, tvec, camera_matrix, dist_coeffs)
+    del projected
+    focal_px = max(float(np.mean([camera_matrix[0, 0], camera_matrix[1, 1]])), 1.0)
+    errors = errors_px / focal_px
+    median = float(np.median(errors))
+    mad_scale = 1.4826 * float(np.median(np.abs(errors - median)))
+    scale = max(1.0 / focal_px, mad_scale)
+    normalized = errors / scale
+    # Pseudo-Huber keeps the score smooth while limiting a bad manual point.
+    loss = np.sqrt(1.0 + normalized ** 2) - 1.0
+    camera_center = -cv2.Rodrigues(rvec)[0].T @ tvec.reshape(3)
+    behind_goal_penalty = 1e3 if float(camera_center[1]) < 0.0 else 0.0
+    return float(np.mean(loss) + 0.25 * np.percentile(loss, 75) + behind_goal_penalty)
+
+
 def try_solve_pnp_ransac(object_points, image_points, camera_matrix, dist_coeffs, flag, solver_name, reprojection_error):
     try:
         ok, rvec, tvec, inliers = cv2.solvePnPRansac(
@@ -356,6 +412,7 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
     if hasattr(cv2, "SOLVEPNP_SQPNP"):
         methods.append((cv2.SOLVEPNP_SQPNP, "solvePnPRansac(SQPNP)", 6.0))
 
+    ransac_candidates = []
     for flag, solver_name, reprojection_error in methods:
         result = try_solve_pnp_ransac(
             object_points,
@@ -367,7 +424,43 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
             reprojection_error,
         )
         if result is not None:
-            return result
+            ransac_candidates.append(result)
+
+    if ransac_candidates:
+        # RANSAC proposes hypotheses only.  Evaluate every proposal against
+        # every reference point and robustly refine it before committing a
+        # runtime pose; returning the first successful proposal is order
+        # dependent and can preserve a local, low-support solution.
+        evaluated = []
+        for candidate in ransac_candidates:
+            for suffix, rvec, tvec in (
+                ("", candidate["rvec"], candidate["tvec"]),
+                (" + robust all-points refine", *refine_pose_robust(
+                    object_points,
+                    image_points,
+                    camera_matrix,
+                    dist_coeffs,
+                    candidate["rvec"],
+                    candidate["tvec"],
+                )),
+            ):
+                evaluated.append({
+                    "solver_name": candidate["solver_name"] + suffix,
+                    "rvec": rvec,
+                    "tvec": tvec,
+                    "inliers": candidate["inliers"],
+                })
+        return min(
+            evaluated,
+            key=lambda item: pose_robust_score(
+                object_points,
+                image_points,
+                camera_matrix,
+                dist_coeffs,
+                item["rvec"],
+                item["tvec"],
+            ),
+        )
 
     # RANSAC all failed — try multiple strategies and pick best
     best_result = None
@@ -432,9 +525,298 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
         _try_solve(f"init {name} behind", rvec_init, tvec_init, use_guess=True)
 
     if best_result is not None:
-        return best_result
+        refined_rvec, refined_tvec = refine_pose_robust(
+            object_points,
+            image_points,
+            camera_matrix,
+            dist_coeffs,
+            best_result["rvec"],
+            best_result["tvec"],
+        )
+        refined_result = {
+            "solver_name": best_result["solver_name"] + " + robust all-points refine",
+            "rvec": refined_rvec,
+            "tvec": refined_tvec,
+            "inliers": best_result["inliers"],
+        }
+        return min(
+            (best_result, refined_result),
+            key=lambda item: pose_robust_score(
+                object_points,
+                image_points,
+                camera_matrix,
+                dist_coeffs,
+                item["rvec"],
+                item["tvec"],
+            ),
+        )
 
     raise RuntimeError("solvePnPRansac failed and all fallback strategies also failed")
+
+
+def calibration_line_pairs(view_type):
+    """Known field segments that can be observed from the configured click anchors."""
+    goal_area_side = "right" if view_type == "shooter_left" else "left"
+    return [
+        ("left_goal_post", "left_post_bottom", "left_post_top"),
+        ("right_goal_post", "right_post_bottom", "right_post_top"),
+        ("crossbar", "left_post_top", "right_post_top"),
+        (
+            "goal_line_to_small_box",
+            f"{goal_area_side}_post_bottom",
+            f"{goal_area_side}_goal_area_goal_line_intersection",
+        ),
+        (
+            "small_box_side",
+            f"{goal_area_side}_goal_area_goal_line_intersection",
+            f"{goal_area_side}_goal_area_corner",
+        ),
+    ]
+
+
+def point_line_distance(points, line_start, line_end):
+    """Perpendicular image-space distance from points to an infinite 2D line."""
+    points = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    start = np.asarray(line_start, dtype=np.float64).reshape(2)
+    end = np.asarray(line_end, dtype=np.float64).reshape(2)
+    direction = end - start
+    length = float(np.linalg.norm(direction))
+    if length < 1e-8:
+        return np.full(len(points), np.inf, dtype=np.float64)
+    return np.abs(direction[0] * (points[:, 1] - start[1]) - direction[1] * (points[:, 0] - start[0])) / length
+
+
+def segment_overlap_ratio(reference_start, reference_end, candidate_start, candidate_end):
+    """Return candidate coverage along a reference segment, independent of direction."""
+    reference_start = np.asarray(reference_start, dtype=np.float64).reshape(2)
+    reference_end = np.asarray(reference_end, dtype=np.float64).reshape(2)
+    candidate_start = np.asarray(candidate_start, dtype=np.float64).reshape(2)
+    candidate_end = np.asarray(candidate_end, dtype=np.float64).reshape(2)
+    direction = reference_end - reference_start
+    length = float(np.linalg.norm(direction))
+    if length < 1e-8:
+        return 0.0
+    unit = direction / length
+    candidate_range = np.sort(np.array([
+        float(np.dot(candidate_start - reference_start, unit)),
+        float(np.dot(candidate_end - reference_start, unit)),
+    ]))
+    overlap = max(0.0, min(length, candidate_range[1]) - max(0.0, candidate_range[0]))
+    return float(overlap / length)
+
+
+def detect_line_near_anchors(image, image_start, image_end):
+    """Find the strongest edge segment near a clicked, known field segment.
+
+    The manual anchors make association deterministic: generic Hough lines are
+    never accepted merely because they are long elsewhere in the image.
+    """
+    start = np.asarray(image_start, dtype=np.float64).reshape(2)
+    end = np.asarray(image_end, dtype=np.float64).reshape(2)
+    length = float(np.linalg.norm(end - start))
+    if length < 30.0:
+        return None
+
+    direction = (end - start) / length
+    normal = np.array([-direction[1], direction[0]], dtype=np.float64)
+    corridor = float(np.clip(length * 0.045, 7.0, 24.0))
+    extension = min(18.0, length * 0.08)
+    polygon = np.array([
+        start - direction * extension + normal * corridor,
+        start - direction * extension - normal * corridor,
+        end + direction * extension - normal * corridor,
+        end + direction * extension + normal * corridor,
+    ], dtype=np.int32)
+
+    mask = np.zeros(image.shape[:2], dtype=np.uint8)
+    cv2.fillConvexPoly(mask, polygon, 255)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 60, 160)
+    edges = cv2.bitwise_and(edges, mask)
+    min_length = max(24, int(round(length * 0.28)))
+    segments = cv2.HoughLinesP(
+        edges,
+        rho=1.0,
+        theta=np.pi / 360.0,
+        threshold=max(16, int(round(length * 0.10))),
+        minLineLength=min_length,
+        maxLineGap=max(8, int(round(length * 0.08))),
+    )
+    if segments is None:
+        return None
+
+    best = None
+    for item in segments.reshape(-1, 4):
+        candidate_start = item[:2].astype(np.float64)
+        candidate_end = item[2:].astype(np.float64)
+        candidate_direction = candidate_end - candidate_start
+        candidate_length = float(np.linalg.norm(candidate_direction))
+        if candidate_length < min_length:
+            continue
+        candidate_unit = candidate_direction / candidate_length
+        angle_alignment = abs(float(np.dot(candidate_unit, direction)))
+        if angle_alignment < math.cos(math.radians(12.0)):
+            continue
+        midpoint_distance = float(point_line_distance(
+            0.5 * (candidate_start + candidate_end), start, end
+        )[0])
+        if midpoint_distance > corridor * 0.75:
+            continue
+        coverage = segment_overlap_ratio(start, end, candidate_start, candidate_end)
+        if coverage < 0.28:
+            continue
+        score = coverage * angle_alignment - 0.35 * midpoint_distance / max(corridor, 1.0)
+        if best is None or score > best["score"]:
+            best = {
+                "image_start": candidate_start,
+                "image_end": candidate_end,
+                "coverage": coverage,
+                "distance_px": midpoint_distance,
+                "score": score,
+            }
+    return best
+
+
+def build_line_constraints(image, view_type, point_names, object_points, image_points):
+    point_index = {name: idx for idx, name in enumerate(point_names)}
+    constraints = []
+    for line_name, start_name, end_name in calibration_line_pairs(view_type):
+        if start_name not in point_index or end_name not in point_index:
+            continue
+        start_idx = point_index[start_name]
+        end_idx = point_index[end_name]
+        detected = detect_line_near_anchors(image, image_points[start_idx], image_points[end_idx])
+        if detected is None:
+            continue
+        constraints.append({
+            "name": line_name,
+            "world_start": np.asarray(object_points[start_idx], dtype=np.float64),
+            "world_end": np.asarray(object_points[end_idx], dtype=np.float64),
+            **detected,
+        })
+    return constraints
+
+
+def line_constraint_rms_px(constraints, rvec, tvec, camera_matrix, dist_coeffs):
+    all_distances = []
+    for constraint in constraints:
+        weights = np.linspace(0.05, 0.95, num=12, dtype=np.float64)[:, None]
+        world_points = (
+            (1.0 - weights) * constraint["world_start"]
+            + weights * constraint["world_end"]
+        )
+        projected = project_points(world_points, rvec, tvec, camera_matrix, dist_coeffs)
+        all_distances.append(point_line_distance(
+            projected,
+            constraint["image_start"],
+            constraint["image_end"],
+        ))
+    if not all_distances:
+        return float("inf")
+    return float(np.sqrt(np.mean(np.concatenate(all_distances) ** 2)))
+
+
+def refine_pose_with_line_constraints(
+    image,
+    view_type,
+    point_names,
+    object_points,
+    image_points,
+    camera_matrix,
+    dist_coeffs,
+    rvec,
+    tvec,
+):
+    """Refine PnP pose with automatically detected, anchor-associated field lines."""
+    constraints = build_line_constraints(image, view_type, point_names, object_points, image_points)
+    metadata = {
+        "enabled": True,
+        "accepted": False,
+        "reason": "no reliable image line found",
+        "detected_line_count": len(constraints),
+        "lines": [
+            {
+                "name": item["name"],
+                "coverage": float(item["coverage"]),
+                "anchor_distance_px": float(item["distance_px"]),
+                "world_start": item["world_start"].tolist(),
+                "world_end": item["world_end"].tolist(),
+                "image_start": item["image_start"].tolist(),
+                "image_end": item["image_end"].tolist(),
+            }
+            for item in constraints
+        ],
+    }
+    if len(constraints) < 2:
+        return rvec, tvec, metadata, constraints
+
+    focal_px = max(float(np.mean([camera_matrix[0, 0], camera_matrix[1, 1]])), 1.0)
+    initial = np.concatenate([
+        np.asarray(rvec, dtype=np.float64).reshape(3),
+        np.asarray(tvec, dtype=np.float64).reshape(3),
+    ])
+    initial_point_score = pose_robust_score(
+        object_points, image_points, camera_matrix, dist_coeffs, rvec, tvec)
+    initial_line_rms = line_constraint_rms_px(constraints, rvec, tvec, camera_matrix, dist_coeffs)
+
+    def residuals(values):
+        current_rvec = values[:3].reshape(3, 1)
+        current_tvec = values[3:].reshape(3, 1)
+        projected = project_points(object_points, current_rvec, current_tvec, camera_matrix, dist_coeffs)
+        point_residuals = ((projected - image_points) / focal_px).ravel()
+        line_residuals = []
+        for constraint in constraints:
+            weights = np.linspace(0.05, 0.95, num=12, dtype=np.float64)[:, None]
+            world_points = (
+                (1.0 - weights) * constraint["world_start"]
+                + weights * constraint["world_end"]
+            )
+            line_projected = project_points(
+                world_points, current_rvec, current_tvec, camera_matrix, dist_coeffs
+            )
+            # A modest weight prevents automatically extracted pixels from
+            # overriding the manually verified point correspondences.
+            line_residuals.append(0.28 * point_line_distance(
+                line_projected,
+                constraint["image_start"],
+                constraint["image_end"],
+            ) / focal_px)
+        return np.concatenate([point_residuals, *line_residuals])
+
+    try:
+        result = least_squares(
+            residuals,
+            initial,
+            loss="soft_l1",
+            f_scale=max(1.5 / focal_px, initial_line_rms / focal_px),
+            max_nfev=250,
+        )
+    except (ValueError, np.linalg.LinAlgError, cv2.error):
+        metadata["reason"] = "line refinement solver failed"
+        return rvec, tvec, metadata, constraints
+
+    candidate_rvec = result.x[:3].reshape(3, 1)
+    candidate_tvec = result.x[3:].reshape(3, 1)
+    candidate_point_score = pose_robust_score(
+        object_points, image_points, camera_matrix, dist_coeffs, candidate_rvec, candidate_tvec)
+    candidate_line_rms = line_constraint_rms_px(
+        constraints, candidate_rvec, candidate_tvec, camera_matrix, dist_coeffs)
+    metadata.update({
+        "initial_line_rms_px": float(initial_line_rms),
+        "refined_line_rms_px": float(candidate_line_rms),
+        "initial_point_score": float(initial_point_score),
+        "refined_point_score": float(candidate_point_score),
+    })
+
+    line_improved = candidate_line_rms <= initial_line_rms * 0.88
+    point_preserved = candidate_point_score <= initial_point_score * 1.03
+    if line_improved and point_preserved:
+        metadata["accepted"] = True
+        metadata["reason"] = "line RMS improved without degrading point fit"
+        return candidate_rvec, candidate_tvec, metadata, constraints
+
+    metadata["reason"] = "candidate did not pass line-improvement / point-fit safeguard"
+    return rvec, tvec, metadata, constraints
 
 
 def compute_camera_center_world(rvec, tvec):
@@ -445,7 +827,7 @@ def compute_camera_center_world(rvec, tvec):
 
 def save_result_json(output_path, meta, point_names, object_points, image_points, projected_points,
                      errors, rvec, tvec, inliers, solver_name, camera_matrix, dist_coeffs,
-                     intrinsics_bundle, working_image_size):
+                     intrinsics_bundle, working_image_size, line_refinement=None):
     rotation_matrix, camera_center = compute_camera_center_world(rvec, tvec)
     inlier_set = set(inliers.tolist())
 
@@ -470,6 +852,8 @@ def save_result_json(output_path, meta, point_names, object_points, image_points
         "swapped_left_right": False,
         "points": [],
     }
+    if line_refinement is not None:
+        data["line_refinement"] = line_refinement
 
     for i, name in enumerate(point_names):
         data["points"].append({
@@ -517,8 +901,30 @@ def save_result_npz(output_path, meta, object_points, image_points, rvec, tvec, 
     )
 
 
-def draw_reprojection(image, image_points, projected_points, point_names):
+def draw_reprojection(image, image_points, projected_points, point_names,
+                      line_constraints=None, rvec=None, tvec=None,
+                      camera_matrix=None, dist_coeffs=None):
     vis = image.copy()
+    for constraint in line_constraints or []:
+        detected_start = tuple(np.rint(constraint["image_start"]).astype(int))
+        detected_end = tuple(np.rint(constraint["image_end"]).astype(int))
+        cv2.line(vis, detected_start, detected_end, (0, 165, 255), 3, cv2.LINE_AA)
+        if rvec is not None and tvec is not None and camera_matrix is not None and dist_coeffs is not None:
+            projected_line = project_points(
+                np.asarray([constraint["world_start"], constraint["world_end"]], dtype=np.float64),
+                rvec,
+                tvec,
+                camera_matrix,
+                dist_coeffs,
+            )
+            cv2.line(
+                vis,
+                tuple(np.rint(projected_line[0]).astype(int)),
+                tuple(np.rint(projected_line[1]).astype(int)),
+                (255, 255, 0),
+                2,
+                cv2.LINE_AA,
+            )
     for i, (p_img, p_prj) in enumerate(zip(image_points, projected_points)):
         xi, yi = int(round(p_img[0])), int(round(p_img[1]))
         xp, yp = int(round(p_prj[0])), int(round(p_prj[1]))
@@ -601,7 +1007,7 @@ def choose_tasks(args):
     raise ValueError("Task must be one of: left / right / all / custom")
 
 
-def process_task(meta):
+def process_task(meta, enable_line_refinement=False):
     image_path = Path(meta["image_path"])
     if not image_path.exists():
         raise FileNotFoundError(f"Failed to read image: {image_path}")
@@ -646,6 +1052,29 @@ def process_task(meta):
     inliers = result["inliers"]
     solver_name = result["solver_name"]
 
+    line_constraints = []
+    line_refinement = {
+        "enabled": bool(enable_line_refinement),
+        "accepted": False,
+        "reason": "disabled; using manual-point robust PnP only",
+        "detected_line_count": 0,
+        "lines": [],
+    }
+    if enable_line_refinement:
+        rvec, tvec, line_refinement, line_constraints = refine_pose_with_line_constraints(
+            image,
+            meta["view_type"],
+            point_names,
+            object_points,
+            image_points,
+            working_camera_matrix,
+            intrinsics_bundle.dist_coeffs,
+            rvec,
+            tvec,
+        )
+        if line_refinement["accepted"]:
+            solver_name += " + automatic line refinement"
+
     projected_points, errors = compute_reprojection_errors(
         object_points, image_points, rvec, tvec, working_camera_matrix, intrinsics_bundle.dist_coeffs
     )
@@ -659,6 +1088,17 @@ def process_task(meta):
     print(f"Mean reprojection error: {np.mean(errors):.3f} px")
     print(f"Max reprojection error: {np.max(errors):.3f} px")
     print(f"Inliers: {inliers.tolist()}")
+    print(
+        "Automatic line refinement: "
+        f"{line_refinement['reason']} "
+        f"({line_refinement['detected_line_count']} reliable lines)"
+    )
+    if "initial_line_rms_px" in line_refinement:
+        print(
+            "Line RMS: "
+            f"{line_refinement['initial_line_rms_px']:.3f} px -> "
+            f"{line_refinement['refined_line_rms_px']:.3f} px"
+        )
 
     print("\n=== Per-Point Error ===")
     for name, err in zip(point_names, errors):
@@ -689,6 +1129,7 @@ def process_task(meta):
         intrinsics_bundle.dist_coeffs,
         intrinsics_bundle,
         (image_w, image_h),
+        line_refinement,
     )
     save_result_npz(
         npz_path,
@@ -723,6 +1164,7 @@ def process_task(meta):
             intrinsics_bundle.dist_coeffs,
             intrinsics_bundle,
             (image_w, image_h),
+            line_refinement,
         )
         save_result_npz(
             tagged_npz_path,
@@ -740,7 +1182,17 @@ def process_task(meta):
             (image_w, image_h),
         )
 
-    vis = draw_reprojection(image, image_points, projected_points, point_names)
+    vis = draw_reprojection(
+        image,
+        image_points,
+        projected_points,
+        point_names,
+        line_constraints,
+        rvec,
+        tvec,
+        working_camera_matrix,
+        intrinsics_bundle.dist_coeffs,
+    )
     cv2.imwrite(str(reproj_path), vis)
     if tagged_reproj_path != reproj_path:
         cv2.imwrite(str(tagged_reproj_path), vis)
@@ -788,6 +1240,11 @@ def parse_args():
         dest="install_calib",
         help="After both cameras succeed, atomically install runtime calibration files into this directory",
     )
+    parser.add_argument(
+        "--enable-line-refinement",
+        action="store_true",
+        help="Experimental: refine the manual-point PnP result with automatically detected field lines.",
+    )
     return parser.parse_args()
 
 
@@ -825,7 +1282,7 @@ def main():
     summary = []
 
     for meta in tasks:
-        result = process_task(meta)
+        result = process_task(meta, enable_line_refinement=args.enable_line_refinement)
         if result is not None:
             summary.append(result)
 
