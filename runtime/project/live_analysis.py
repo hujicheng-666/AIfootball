@@ -60,6 +60,7 @@ class _CamTracker:
         self.points = []                          # 2D 中心
         self.foots = []
         self.confs = []
+        self.center_covariances = []
         self.ground_points = []                   # 地面投影（需标定）
 
     def reset_geometry(self, frame_w, frame_h):
@@ -104,6 +105,10 @@ class _CamTracker:
         self.points.append(chosen["center"].copy())
         self.foots.append(chosen["foot"].copy())
         self.confs.append(float(chosen["conf"]))
+        self.center_covariances.append(np.asarray(
+            chosen.get("center_covariance", np.eye(2, dtype=np.float64) * 9.0),
+            dtype=np.float64,
+        ).reshape(2, 2).copy())
         if self.config is not None:
             gp = image_point_to_ground_world(chosen["foot"], self.config, ground_z=0.0)
             self.ground_points.append(None if gp is None else gp.copy())
@@ -119,12 +124,13 @@ class _CamTracker:
 
     def track_after_kick(self, kick_frame):
         """剔除起脚前的点（球静止在罚球点附近），返回新时间/点/置信度"""
-        times, points, confs = [], [], []
+        times, points, confs, covariances = [], [], [], []
         for i in range(kick_frame, len(self.times)):
             times.append(self.times[i])
             points.append(self.points[i])
             confs.append(self.confs[i])
-        return times, points, confs
+            covariances.append(self.center_covariances[i])
+        return times, points, confs, covariances
 
 
 def _draw_ball(frame, chosen, color=(0, 255, 0)):
@@ -181,7 +187,7 @@ def finish_reconstruction(sample_name, sample_dir, tracker_l, tracker_r,
             kick = 0
 
     def make_track(tracker, cam_name, kick_frame):
-        times, points, confs = tracker.track_after_kick(kick_frame)
+        times, points, confs, covariances = tracker.track_after_kick(kick_frame)
         video_path = (sample_dir / cam_name / "recording.mp4") if saved_ok else sample_dir / f"live_{cam_name}.mp4"
         return VideoTrack(
             video_path=video_path,
@@ -194,6 +200,12 @@ def finish_reconstruction(sample_name, sample_dir, tracker_l, tracker_r,
             times=np.asarray(times, dtype=np.float64),
             image_points=np.asarray(points, dtype=np.float64),
             confidences=np.asarray(confs, dtype=np.float64),
+            center_covariances=np.asarray(covariances, dtype=np.float64),
+            path_diagnostics={
+                "enabled": False,
+                "applied": False,
+                "reason": "live stream uses its causal detector path",
+            },
         )
 
     if left_cfg is None or right_cfg is None:

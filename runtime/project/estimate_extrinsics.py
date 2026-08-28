@@ -554,6 +554,90 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
     raise RuntimeError("solvePnPRansac failed and all fallback strategies also failed")
 
 
+def reject_single_correspondence_outlier(
+    object_points, image_points, camera_matrix, dist_coeffs, initial_result, view_type,
+):
+    """Use leave-one-out validation to prevent one ambiguous manual click corrupting PnP.
+
+    This is intentionally conservative: a point is rejected only when the pose
+    estimated from all remaining points both improves substantially and predicts
+    the withheld observation as an unmistakable outlier.  It is independent of
+    point labels, camera side, and sample-specific pixel thresholds.
+    """
+    count = len(object_points)
+    metadata = {
+        "enabled": True,
+        "accepted": False,
+        "reason": "no validated single-point outlier",
+        "candidates": [],
+    }
+    if count < 6:
+        metadata["reason"] = "need at least six correspondences for leave-one-out validation"
+        return initial_result, metadata
+
+    _, initial_errors = compute_reprojection_errors(
+        object_points, image_points, initial_result["rvec"], initial_result["tvec"],
+        camera_matrix, dist_coeffs,
+    )
+    initial_inliers = np.asarray(initial_result["inliers"], dtype=np.int32)
+    initial_mean = float(np.mean(initial_errors[initial_inliers]))
+    accepted = []
+
+    for excluded_index in range(count):
+        keep_indices = np.array([index for index in range(count) if index != excluded_index], dtype=np.int32)
+        try:
+            subset = estimate_extrinsics(
+                object_points[keep_indices], image_points[keep_indices],
+                camera_matrix, dist_coeffs, view_type=view_type,
+            )
+        except RuntimeError:
+            continue
+
+        _, all_errors = compute_reprojection_errors(
+            object_points, image_points, subset["rvec"], subset["tvec"],
+            camera_matrix, dist_coeffs,
+        )
+        train_errors = all_errors[keep_indices]
+        train_mean = float(np.mean(train_errors))
+        train_median = float(np.median(train_errors))
+        train_sigma = 1.4826 * float(np.median(np.abs(train_errors - train_median)))
+        predicted_error = float(all_errors[excluded_index])
+        expected_upper = max(12.0, train_median + 6.0 * train_sigma, train_mean * 4.0)
+        _, camera_center = compute_camera_center_world(subset["rvec"], subset["tvec"])
+        camera_above_ground = float(camera_center[2]) > 0.0
+        materially_better = train_mean < initial_mean * 0.70
+        unequivocal_outlier = predicted_error > expected_upper
+        candidate_info = {
+            "excluded_index": int(excluded_index),
+            "training_mean_error_px": train_mean,
+            "withheld_prediction_error_px": predicted_error,
+            "withheld_expected_upper_px": float(expected_upper),
+            "camera_height_m": float(camera_center[2]),
+            "accepted": bool(materially_better and unequivocal_outlier and camera_above_ground),
+        }
+        metadata["candidates"].append(candidate_info)
+        if candidate_info["accepted"]:
+            accepted.append((train_mean, excluded_index, keep_indices, subset, candidate_info))
+
+    if not accepted:
+        return initial_result, metadata
+
+    _, excluded_index, keep_indices, subset, selected_info = min(accepted, key=lambda item: item[0])
+    metadata.update({
+        "accepted": True,
+        "reason": "leave-one-out validation rejected one geometrically inconsistent correspondence",
+        "excluded_index": int(excluded_index),
+        "training_inliers": keep_indices.tolist(),
+        "selected_candidate": selected_info,
+    })
+    return {
+        "solver_name": subset["solver_name"] + " + leave-one-out outlier rejection",
+        "rvec": subset["rvec"],
+        "tvec": subset["tvec"],
+        "inliers": keep_indices,
+    }, metadata
+
+
 def calibration_line_pairs(view_type):
     """Known field segments that can be observed from the configured click anchors."""
     goal_area_side = "right" if view_type == "shooter_left" else "left"
@@ -825,12 +909,147 @@ def compute_camera_center_world(rvec, tvec):
     return rotation_matrix, camera_center
 
 
+def _angular_reprojection_residual(object_points, image_points, rvec, tvec, camera_matrix, dist_coeffs):
+    """Image residual normalised by focal length, comparable between cameras."""
+    focal_px = max(float(np.mean([camera_matrix[0, 0], camera_matrix[1, 1]])), 1.0)
+    projected = project_points(object_points, rvec, tvec, camera_matrix, dist_coeffs)
+    return ((projected - image_points) / focal_px).reshape(-1)
+
+
+def joint_stereo_bundle_adjustment(left, right):
+    """Run a guarded two-camera bundle adjustment over the clicked field points.
+
+    The field coordinates remain *fixed* because they are measured dimensions,
+    not free latent points.  This avoids inventing a camera baseline or bending
+    the field to fit a bad click.  With fixed points the two pose blocks are
+    mathematically almost separable; the joint solve is consequently used as a
+    common robust optimisation and a consistency check, never as a reason to
+    force a worse pose into the runtime calibration.
+    """
+    observations = (left, right)
+
+    def active_correspondences(item):
+        indices = np.asarray(item["inliers"], dtype=np.int32)
+        return item["object_points"][indices], item["image_points"][indices]
+    initial = np.concatenate([
+        np.asarray(item["rvec"], dtype=np.float64).reshape(3)
+        for item in observations
+    ] + [
+        np.asarray(item["tvec"], dtype=np.float64).reshape(3)
+        for item in observations
+    ])
+
+    # Parameter order is [left rotation, right rotation, left translation,
+    # right translation], deliberately keeping rotation and translation units
+    # separate while allowing scipy's Jacobian scaling to condition the solve.
+    def unpack(values, camera_index):
+        rotation_offset = camera_index * 3
+        translation_offset = 6 + camera_index * 3
+        return (
+            values[rotation_offset:rotation_offset + 3].reshape(3, 1),
+            values[translation_offset:translation_offset + 3].reshape(3, 1),
+        )
+
+    initial_residual = np.concatenate([
+        _angular_reprojection_residual(
+            *active_correspondences(item), item["rvec"], item["tvec"],
+            item["camera_matrix"], item["dist_coeffs"],
+        )
+        for item in observations
+    ])
+    median_residual = float(np.median(initial_residual))
+    mad_sigma = 1.4826 * float(np.median(np.abs(initial_residual - median_residual)))
+    focal_floor = min(
+        1.0 / max(float(np.mean([item["camera_matrix"][0, 0], item["camera_matrix"][1, 1]])), 1.0)
+        for item in observations
+    )
+    robust_scale = max(focal_floor, mad_sigma)
+
+    def residuals(values):
+        residual_blocks = []
+        for index, item in enumerate(observations):
+            rvec, tvec = unpack(values, index)
+            residual_blocks.append(_angular_reprojection_residual(
+                *active_correspondences(item), rvec, tvec,
+                item["camera_matrix"], item["dist_coeffs"],
+            ))
+        return np.concatenate(residual_blocks)
+
+    metadata = {
+        "enabled": True,
+        "accepted": False,
+        "reason": "not evaluated",
+        "loss": "soft_l1 angular reprojection",
+        "world_points_fixed": True,
+        "shared_robust_scale_rad": float(robust_scale),
+        "cameras": {},
+    }
+    try:
+        result = least_squares(
+            residuals,
+            initial,
+            loss="soft_l1",
+            f_scale=robust_scale,
+            x_scale="jac",
+            max_nfev=400,
+        )
+    except (ValueError, np.linalg.LinAlgError, cv2.error) as exc:
+        metadata["reason"] = f"joint bundle solver failed: {type(exc).__name__}"
+        return None, metadata
+
+    candidate_residual = residuals(result.x)
+    initial_rms = float(np.sqrt(np.mean(initial_residual ** 2)))
+    candidate_rms = float(np.sqrt(np.mean(candidate_residual ** 2)))
+    candidates = []
+    per_camera_non_degraded = True
+    for index, item in enumerate(observations):
+        candidate_rvec, candidate_tvec = unpack(result.x, index)
+        active_object_points, active_image_points = active_correspondences(item)
+        _, initial_errors = compute_reprojection_errors(
+            active_object_points, active_image_points, item["rvec"], item["tvec"],
+            item["camera_matrix"], item["dist_coeffs"],
+        )
+        _, candidate_errors = compute_reprojection_errors(
+            active_object_points, active_image_points, candidate_rvec, candidate_tvec,
+            item["camera_matrix"], item["dist_coeffs"],
+        )
+        initial_mean = float(np.mean(initial_errors))
+        candidate_mean = float(np.mean(candidate_errors))
+        # Never exchange a small global improvement for a material regression
+        # in one camera.  One percent leaves room for robust-loss trade-offs.
+        per_camera_non_degraded &= candidate_mean <= initial_mean * 1.01 + 1e-9
+        metadata["cameras"][item["output_prefix"]] = {
+            "initial_mean_reprojection_error_px": initial_mean,
+            "candidate_mean_reprojection_error_px": candidate_mean,
+            "initial_max_reprojection_error_px": float(np.max(initial_errors)),
+            "candidate_max_reprojection_error_px": float(np.max(candidate_errors)),
+        }
+        candidates.append((candidate_rvec, candidate_tvec, candidate_errors))
+
+    metadata["initial_joint_rms_rad"] = initial_rms
+    metadata["candidate_joint_rms_rad"] = candidate_rms
+    metadata["solver_status"] = int(result.status)
+    metadata["solver_evaluations"] = int(result.nfev)
+    materially_improved = candidate_rms < initial_rms * (1.0 - 1e-4)
+    if materially_improved and per_camera_non_degraded:
+        metadata["accepted"] = True
+        metadata["reason"] = "joint robust reprojection RMS improved without degrading either camera"
+        return candidates, metadata
+
+    metadata["reason"] = (
+        "candidate rejected: no material joint improvement or a camera would regress"
+    )
+    return None, metadata
+
+
 def save_result_json(output_path, meta, point_names, object_points, image_points, projected_points,
                      errors, rvec, tvec, inliers, solver_name, camera_matrix, dist_coeffs,
-                     intrinsics_bundle, working_image_size, line_refinement=None):
+                     intrinsics_bundle, working_image_size, line_refinement=None,
+                     stereo_bundle_adjustment=None, outlier_rejection=None):
     rotation_matrix, camera_center = compute_camera_center_world(rvec, tvec)
     inlier_set = set(inliers.tolist())
 
+    inlier_errors = np.asarray(errors, dtype=np.float64)[np.asarray(inliers, dtype=np.int32)]
     data = {
         "image_path": str(meta["image_path"]),
         "view_type": meta["view_type"],
@@ -846,14 +1065,20 @@ def save_result_json(output_path, meta, point_names, object_points, image_points
         "camera_center_world": camera_center.reshape(-1).tolist(),
         "camera_matrix": camera_matrix.tolist(),
         "dist_coeffs": dist_coeffs.reshape(-1).tolist(),
-        "mean_reprojection_error": float(np.mean(errors)),
-        "max_reprojection_error": float(np.max(errors)),
+        "mean_reprojection_error": float(np.mean(inlier_errors)),
+        "max_reprojection_error": float(np.max(inlier_errors)),
+        "mean_all_point_reprojection_error": float(np.mean(errors)),
+        "max_all_point_reprojection_error": float(np.max(errors)),
         "inliers": inliers.tolist(),
         "swapped_left_right": False,
         "points": [],
     }
     if line_refinement is not None:
         data["line_refinement"] = line_refinement
+    if stereo_bundle_adjustment is not None:
+        data["stereo_bundle_adjustment"] = stereo_bundle_adjustment
+    if outlier_rejection is not None:
+        data["outlier_rejection"] = outlier_rejection
 
     for i, name in enumerate(point_names):
         data["points"].append({
@@ -874,6 +1099,7 @@ def save_result_npz(output_path, meta, object_points, image_points, rvec, tvec, 
                     solver_name, camera_matrix, dist_coeffs, errors,
                     intrinsics_bundle, working_image_size):
     rotation_matrix, camera_center = compute_camera_center_world(rvec, tvec)
+    inlier_errors = np.asarray(errors, dtype=np.float64)[np.asarray(inliers, dtype=np.int32)]
     np.savez(
         output_path,
         image_path=str(meta["image_path"]),
@@ -893,8 +1119,10 @@ def save_result_npz(output_path, meta, object_points, image_points, rvec, tvec, 
         tvec=tvec,
         R=rotation_matrix,
         camera_center_world=camera_center,
-        mean_reprojection_error=float(np.mean(errors)),
-        max_reprojection_error=float(np.max(errors)),
+        mean_reprojection_error=float(np.mean(inlier_errors)),
+        max_reprojection_error=float(np.max(inlier_errors)),
+        mean_all_point_reprojection_error=float(np.mean(errors)),
+        max_all_point_reprojection_error=float(np.max(errors)),
         inliers=inliers,
         swapped_left_right=False,
         solver_name=solver_name,
@@ -935,6 +1163,54 @@ def draw_reprojection(image, image_points, projected_points, point_names,
         cv2.putText(vis, POINT_LABELS.get(point_names[i], point_names[i]), (xi + 8, yi - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2, cv2.LINE_AA)
     return vis
+
+
+def overwrite_task_artifacts(task, stereo_bundle_adjustment):
+    """Persist the accepted joint result (or its rejection diagnostic) for one camera."""
+    meta = task["meta"]
+    intrinsics_bundle = task["intrinsics_bundle"]
+    canonical_prefix = meta["output_prefix"]
+    tagged_prefix = f"{canonical_prefix}_{intrinsics_bundle.profile_name}"
+    json_path = OUTPUT_DIR / f"{canonical_prefix}_extrinsics.json"
+    npz_path = OUTPUT_DIR / f"{canonical_prefix}_pose.npz"
+    reproj_path = OUTPUT_DIR / f"{canonical_prefix}_reprojection.jpg"
+    tagged_json_path = OUTPUT_DIR / f"{tagged_prefix}_extrinsics.json"
+    tagged_npz_path = OUTPUT_DIR / f"{tagged_prefix}_pose.npz"
+    tagged_reproj_path = OUTPUT_DIR / f"{tagged_prefix}_reprojection.jpg"
+    projected_points, errors = compute_reprojection_errors(
+        task["object_points"], task["image_points"], task["rvec"], task["tvec"],
+        task["camera_matrix"], task["dist_coeffs"],
+    )
+
+    def write_pair(current_json_path, current_npz_path):
+        save_result_json(
+            current_json_path, meta, task["point_names"], task["object_points"],
+            task["image_points"], projected_points, errors, task["rvec"], task["tvec"],
+            task["inliers"], task["solver_name"], task["camera_matrix"], task["dist_coeffs"],
+            intrinsics_bundle, task["working_image_size"], task["line_refinement"],
+            stereo_bundle_adjustment, task["outlier_rejection"],
+        )
+        save_result_npz(
+            current_npz_path, meta, task["object_points"], task["image_points"],
+            task["rvec"], task["tvec"], task["inliers"], task["solver_name"],
+            task["camera_matrix"], task["dist_coeffs"], errors, intrinsics_bundle,
+            task["working_image_size"],
+        )
+
+    write_pair(json_path, npz_path)
+    if tagged_json_path != json_path:
+        write_pair(tagged_json_path, tagged_npz_path)
+
+    vis = draw_reprojection(
+        task["image"], task["image_points"], projected_points, task["point_names"],
+        task["line_constraints"], task["rvec"], task["tvec"],
+        task["camera_matrix"], task["dist_coeffs"],
+    )
+    cv2.imwrite(str(reproj_path), vis)
+    if tagged_reproj_path != reproj_path:
+        cv2.imwrite(str(tagged_reproj_path), vis)
+    task["errors"] = errors
+    task["mean_error"] = float(np.mean(errors[np.asarray(task["inliers"], dtype=np.int32)]))
 
 
 def print_point_order(point_names):
@@ -1047,6 +1323,14 @@ def process_task(meta, enable_line_refinement=False):
         return None
 
     result = estimate_extrinsics(object_points, image_points, working_camera_matrix, intrinsics_bundle.dist_coeffs, view_type=meta["view_type"])
+    result, outlier_rejection = reject_single_correspondence_outlier(
+        object_points,
+        image_points,
+        working_camera_matrix,
+        intrinsics_bundle.dist_coeffs,
+        result,
+        meta["view_type"],
+    )
     rvec = result["rvec"]
     tvec = result["tvec"]
     inliers = result["inliers"]
@@ -1078,6 +1362,7 @@ def process_task(meta, enable_line_refinement=False):
     projected_points, errors = compute_reprojection_errors(
         object_points, image_points, rvec, tvec, working_camera_matrix, intrinsics_bundle.dist_coeffs
     )
+    inlier_errors = errors[np.asarray(inliers, dtype=np.int32)]
 
     print("\n=== Extrinsics Result ===")
     print("solver =", solver_name)
@@ -1085,9 +1370,12 @@ def process_task(meta, enable_line_refinement=False):
     print(rvec)
     print("tvec =")
     print(tvec)
-    print(f"Mean reprojection error: {np.mean(errors):.3f} px")
-    print(f"Max reprojection error: {np.max(errors):.3f} px")
+    print(f"Mean inlier reprojection error: {np.mean(inlier_errors):.3f} px")
+    print(f"Max inlier reprojection error: {np.max(inlier_errors):.3f} px")
+    if len(inlier_errors) != len(errors):
+        print(f"All-point reprojection error: mean={np.mean(errors):.3f} px, max={np.max(errors):.3f} px")
     print(f"Inliers: {inliers.tolist()}")
+    print(f"Correspondence validation: {outlier_rejection['reason']}")
     print(
         "Automatic line refinement: "
         f"{line_refinement['reason']} "
@@ -1130,6 +1418,8 @@ def process_task(meta, enable_line_refinement=False):
         intrinsics_bundle,
         (image_w, image_h),
         line_refinement,
+        None,
+        outlier_rejection,
     )
     save_result_npz(
         npz_path,
@@ -1165,6 +1455,8 @@ def process_task(meta, enable_line_refinement=False):
             intrinsics_bundle,
             (image_w, image_h),
             line_refinement,
+            None,
+            outlier_rejection,
         )
         save_result_npz(
             tagged_npz_path,
@@ -1218,7 +1510,24 @@ def process_task(meta, enable_line_refinement=False):
     return {
         "output_prefix": canonical_prefix,
         "intrinsics_profile": intrinsics_bundle.profile_name,
-        "mean_error": float(np.mean(errors)),
+        "mean_error": float(np.mean(inlier_errors)),
+        "meta": meta,
+        "image": image,
+        "point_names": point_names,
+        "object_points": object_points,
+        "image_points": image_points,
+        "rvec": rvec,
+        "tvec": tvec,
+        "inliers": inliers,
+        "solver_name": solver_name,
+        "camera_matrix": working_camera_matrix,
+        "dist_coeffs": intrinsics_bundle.dist_coeffs,
+        "intrinsics_bundle": intrinsics_bundle,
+        "working_image_size": (image_w, image_h),
+        "line_constraints": line_constraints,
+        "line_refinement": line_refinement,
+        "outlier_rejection": outlier_rejection,
+        "errors": errors,
     }
 
 
@@ -1287,6 +1596,35 @@ def main():
             summary.append(result)
 
     cv2.destroyAllWindows()
+
+    by_prefix = {item["output_prefix"]: item for item in summary}
+    if {"left", "right"}.issubset(by_prefix):
+        bundle_candidates, bundle_metadata = joint_stereo_bundle_adjustment(
+            by_prefix["left"], by_prefix["right"]
+        )
+        print("\n=== Joint Stereo Bundle Adjustment ===")
+        print(bundle_metadata["reason"])
+        print(
+            "Joint angular RMS: "
+            f"{bundle_metadata.get('initial_joint_rms_rad', float('nan')):.7f} -> "
+            f"{bundle_metadata.get('candidate_joint_rms_rad', float('nan')):.7f} rad"
+        )
+        if bundle_candidates is not None:
+            for item, (rvec, tvec, errors) in zip(
+                (by_prefix["left"], by_prefix["right"]), bundle_candidates
+            ):
+                item["rvec"] = rvec
+                item["tvec"] = tvec
+                item["errors"] = errors
+                item["solver_name"] += " + joint stereo bundle adjustment"
+        for item in (by_prefix["left"], by_prefix["right"]):
+            overwrite_task_artifacts(item, bundle_metadata)
+            camera_metrics = bundle_metadata["cameras"].get(item["output_prefix"], {})
+            print(
+                f"{item['output_prefix']}: "
+                f"{camera_metrics.get('initial_mean_reprojection_error_px', float('nan')):.3f} -> "
+                f"{item['mean_error']:.3f} px"
+            )
 
     if summary:
         print("\n===== Summary =====")
