@@ -8,6 +8,8 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from scipy.integrate import solve_ivp
+from scipy.optimize import brentq, least_squares, minimize_scalar
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -35,6 +37,11 @@ MIN_BALLISTIC_INLIERS = 8
 MIN_CONSENSUS_REFINEMENT_INLIERS = 4
 MIN_FIT_REPROJECTION_THRESHOLD_PX = 3.0
 CALIBRATION_REPROJECTION_BUDGET_SCALE = 1.5
+# 空气阻力：k = ρ·Cd·A/(2m)，足球 (Cd≈0.25) 时 k≈0.016 1/m。25 m/s 点球的
+# 阻力减速 ~10 m/s²，与重力同量级，纯抛物线会产生分米级门线落点偏差。
+# k 上界对应 Cd≈0.48，防止与初速强相关时拟合发散；k→0 即退回纯抛物线。
+DRAG_EPS = 1.0e-6
+DRAG_K_MAX = 0.03
 
 
 @dataclass
@@ -173,7 +180,7 @@ def fit_once(times_rel, points, weights):
     y0, vy = weighted_linear_fit(times_rel, points[:, 1], weights)
     z_target = points[:, 2] + 0.5 * GRAVITY * (times_rel ** 2)
     z0, vz = weighted_linear_fit(times_rel, z_target, weights)
-    return x0, vx, y0, vy, z0, vz
+    return x0, vx, y0, vy, z0, vz, 0.0
 
 
 def weighted_slope_through_origin(times_rel, values, weights):
@@ -197,33 +204,95 @@ def fit_ballistic_from_origin(times_abs, points, weights, origin_time_sec, origi
     vy = weighted_slope_through_origin(tau, points[:, 1] - origin_point[1], weights)
     z_target = points[:, 2] - origin_point[2] + 0.5 * GRAVITY * (tau ** 2)
     vz = weighted_slope_through_origin(tau, z_target, weights)
-    params = (float(origin_point[0]), vx, float(origin_point[1]), vy, float(origin_point[2]), vz)
+    params = (float(origin_point[0]), vx, float(origin_point[1]), vy, float(origin_point[2]), vz, 0.0)
     fitted = evaluate_ballistic(params, times_abs, origin_time_sec)
     residuals = np.linalg.norm(points - fitted, axis=1)
     return params, fitted, residuals
 
 
+def _integrate_drag_trajectory(x0, vx, y0, vy, z0, vz, k_drag, taus):
+    """二次空气阻力 ODE（dv/dt = -g·ẑ - k|v|v）的 RK45 数值解。
+
+    初值条件定义在 tau=0，观测时刻可能早于或晚于 origin：分别向正/
+    负时间方向积分再按原顺序拼接。用求解器 dense 输出避免固定步长
+    在快球段积分误差累积。
+    """
+    tau = np.asarray(taus, dtype=np.float64)
+    state0 = [float(x0), float(vx), float(y0), float(vy), float(z0), float(vz)]
+
+    def rhs(_t, state):
+        # state = [x, vx, y, vy, z, vz]
+        vx_, vy_, vz_ = state[1], state[3], state[5]
+        speed = math.sqrt(vx_ * vx_ + vy_ * vy_ + vz_ * vz_)
+        return (
+            vx_,
+            -k_drag * speed * vx_,
+            vy_,
+            -k_drag * speed * vy_,
+            vz_,
+            -k_drag * speed * vz_ - GRAVITY,
+        )
+
+    def solve(direction, eval_times):
+        if len(eval_times) == 0:
+            return None
+        end = float(eval_times[-1])
+        sol = solve_ivp(
+            rhs,
+            (0.0, end),
+            state0,
+            t_eval=eval_times,
+            method="RK45",
+            rtol=1e-8,
+            atol=1e-9,
+        )
+        if not sol.success or sol.y.shape[1] != len(eval_times):
+            raise RuntimeError("阻力弹道积分失败")
+        return sol.y.T
+
+    result = np.empty((len(tau), 6), dtype=np.float64)
+    forward_mask = tau >= 0.0
+    backward_mask = ~forward_mask
+    if np.any(forward_mask):
+        order = np.argsort(tau[forward_mask])
+        values = solve(+1, tau[forward_mask][order])
+        forward_points = np.empty((int(np.count_nonzero(forward_mask)), 6), dtype=np.float64)
+        forward_points[order] = values
+        result[forward_mask] = forward_points
+    if np.any(backward_mask):
+        order = np.argsort(tau[backward_mask])[::-1]
+        values = solve(-1, tau[backward_mask][order])
+        backward_points = np.empty((int(np.count_nonzero(backward_mask)), 6), dtype=np.float64)
+        backward_points[order] = values
+        result[backward_mask] = backward_points
+    return result
+
+
 def evaluate_ballistic(params, times_abs, time_origin_sec):
-    x0, vx, y0, vy, z0, vz = params
+    x0, vx, y0, vy, z0, vz = [float(v) for v in params[:6]]
+    k_drag = float(params[6]) if len(params) > 6 else 0.0
     tau = np.asarray(times_abs, dtype=np.float64) - float(time_origin_sec)
-    x = x0 + vx * tau
-    y = y0 + vy * tau
-    z = z0 + vz * tau - 0.5 * GRAVITY * (tau ** 2)
-    return np.column_stack([x, y, z])
+    if k_drag <= DRAG_EPS:
+        x = x0 + vx * tau
+        y = y0 + vy * tau
+        z = z0 + vz * tau - 0.5 * GRAVITY * (tau ** 2)
+        return np.column_stack([x, y, z])
+    integrated = _integrate_drag_trajectory(x0, vx, y0, vy, z0, vz, k_drag, tau)
+    return integrated[:, [0, 2, 4]]
 
 
-def compose_params_from_penalty_launch(launch_time_sec, vx, vy, vz_launch, reference_time_sec):
+def compose_params_from_penalty_launch(launch_time_sec, vx, vy, vz_launch, reference_time_sec, k_drag=0.0):
     tau0 = float(reference_time_sec) - float(launch_time_sec)
     x0 = float(PENALTY_SPOT_BALL_CENTER_WORLD[0] + float(vx) * tau0)
     y0 = float(PENALTY_SPOT_BALL_CENTER_WORLD[1] + float(vy) * tau0)
     z0 = float(PENALTY_SPOT_BALL_CENTER_WORLD[2] + float(vz_launch) * tau0 - 0.5 * GRAVITY * (tau0 ** 2))
     vz0 = float(vz_launch - GRAVITY * tau0)
-    return x0, float(vx), y0, float(vy), z0, vz0
+    return x0, float(vx), y0, float(vy), z0, vz0, float(k_drag)
 
 
 
 def estimate_launch_time_from_standard_params(params, time_origin_sec):
-    _, _, _, _, z0, vz = [float(v) for v in params]
+    _, _, _, _, z0, vz = [float(v) for v in params[:6]]
     disc = vz * vz + 2.0 * GRAVITY * z0
     if disc >= 0.0:
         tau_launch = (vz - math.sqrt(disc)) / GRAVITY
@@ -294,7 +363,7 @@ def estimate_penalty_launch_init_params(
             best_params = launch_params
 
     if best_params is None:
-        _, vx, _, vy, _, vz = [float(v) for v in init_params]
+        _, vx, _, vy, _, vz = [float(v) for v in init_params[:6]]
         return np.array([init_launch_time, vx, vy, max(0.1, vz)], dtype=np.float64)
     return best_params
 
@@ -336,6 +405,13 @@ def optimize_ballistic_reprojection(
     confidences_right,
     camera_configs,
 ):
+    """以双相机像素重投影为目标的有界最小二乘（TRF）拟合。
+
+    优化变量为 [起跳时刻, vx, vy, vz, k_drag]（起跳点固定在罚球点球心），
+    目标是加权重投影均方：残差 r_i = √w_i·mean(errL_i, errR_i)，其 0.5Σr²
+    与原加权目标只差常数因子。原实现是坐标下降 + 随机扰动的零阶搜索，
+    无收敛保证；目标对参数光滑有界，TRF 以数值雅可比几步收敛到局部最优。
+    """
     times = np.asarray(times, dtype=np.float64)
     image_points_left = np.asarray(image_points_left, dtype=np.float64)
     image_points_right = np.asarray(image_points_right, dtype=np.float64)
@@ -343,9 +419,10 @@ def optimize_ballistic_reprojection(
     conf_left = np.clip(np.asarray(confidences_left, dtype=np.float64), 0.05, 1.0)
     conf_right = np.clip(np.asarray(confidences_right, dtype=np.float64), 0.05, 1.0)
     point_weights = np.clip(base_weights * np.sqrt(conf_left * conf_right), 1e-8, None)
+    residual_scale = np.sqrt(point_weights) * 0.5
 
     observed_points = np.asarray(observed_points, dtype=np.float64)
-    current = estimate_penalty_launch_init_params(
+    seed_launch = estimate_penalty_launch_init_params(
         init_params,
         time_origin_sec,
         times,
@@ -357,16 +434,16 @@ def optimize_ballistic_reprojection(
     )
     launch_lower = float(np.min(times) - 1.2)
     launch_upper = float(np.min(times))
-    lower = np.array([launch_lower, -45.0, -65.0, 0.05], dtype=np.float64)
-    upper = np.array([launch_upper, 45.0, 15.0, 25.0], dtype=np.float64)
+    lower = np.array([launch_lower, -45.0, -65.0, 0.05, 0.0], dtype=np.float64)
+    upper = np.array([launch_upper, 45.0, 15.0, 25.0, DRAG_K_MAX], dtype=np.float64)
+    current = np.append(np.asarray(seed_launch, dtype=np.float64), 0.0)
     current = np.clip(current, lower, upper)
 
-    def compose_params(launch_params):
-        launch_time_sec, vx, vy, vz = [float(v) for v in launch_params]
-        return compose_params_from_penalty_launch(launch_time_sec, vx, vy, vz, time_origin_sec)
-
-    def objective(launch_params):
-        params = compose_params(launch_params)
+    def residuals(launch_params):
+        params = compose_params_from_penalty_launch(
+            launch_params[0], launch_params[1], launch_params[2], launch_params[3],
+            time_origin_sec, k_drag=launch_params[4],
+        )
         mean_err, _, _ = compute_fit_reprojection_errors_px(
             params,
             time_origin_sec,
@@ -375,34 +452,24 @@ def optimize_ballistic_reprojection(
             image_points_right,
             camera_configs,
         )
-        return float(np.average(mean_err ** 2, weights=point_weights))
+        return residual_scale * mean_err
 
-    best_score = objective(current)
-    step = np.array([0.02, 0.85, 1.1, 0.75], dtype=np.float64)
-    rng = np.random.default_rng(42)
-    for _ in range(14):
-        improved = False
-        for axis in range(len(current)):
-            axis_best = current.copy()
-            axis_best_score = best_score
-            for direction in (-1.0, 1.0):
-                trial = current.copy()
-                trial[axis] = np.clip(trial[axis] + direction * step[axis], lower[axis], upper[axis])
-                score = objective(trial)
-                if score < axis_best_score:
-                    axis_best, axis_best_score = trial, score
-            if axis_best_score < best_score:
-                current, best_score, improved = axis_best, axis_best_score, True
-        for _ in range(24):
-            trial = np.clip(current + rng.normal(scale=step, size=current.shape), lower, upper)
-            score = objective(trial)
-            if score < best_score:
-                current, best_score, improved = trial, score, True
-        step *= 0.8 if improved else 0.5
-        if float(np.max(step)) < 1e-3:
-            break
+    try:
+        result = least_squares(
+            residuals,
+            current,
+            bounds=(lower, upper),
+            x_scale="jac",
+            max_nfev=300,
+        )
+        current = result.x
+    except (ValueError, np.linalg.LinAlgError):
+        pass
 
-    return compose_params(current)
+    return compose_params_from_penalty_launch(
+        current[0], current[1], current[2], current[3],
+        time_origin_sec, k_drag=current[4],
+    )
 
 def optimize_ballistic_from_origin_reprojection(
     init_params,
@@ -415,7 +482,13 @@ def optimize_ballistic_from_origin_reprojection(
     confidences_left,
     confidences_right,
     camera_configs,
+    k_drag=0.0,
 ):
+    """反弹段（起点固定在落地点）的速度有界最小二乘拟合。
+
+    段短、观测少，k_drag 沿用飞行段拟合值而不单独放开，避免弱可观
+    参数在少量点上过拟合。
+    """
     times = np.asarray(times, dtype=np.float64)
     image_points_left = np.asarray(image_points_left, dtype=np.float64)
     image_points_right = np.asarray(image_points_right, dtype=np.float64)
@@ -423,6 +496,7 @@ def optimize_ballistic_from_origin_reprojection(
     conf_left = np.clip(np.asarray(confidences_left, dtype=np.float64), 0.05, 1.0)
     conf_right = np.clip(np.asarray(confidences_right, dtype=np.float64), 0.05, 1.0)
     point_weights = np.clip(base_weights * np.sqrt(conf_left * conf_right), 1e-8, None)
+    residual_scale = np.sqrt(point_weights) * 0.5
 
     origin_point = np.asarray(origin_point, dtype=np.float64).reshape(3)
     current = np.array([init_params[1], init_params[3], init_params[5]], dtype=np.float64)
@@ -430,18 +504,16 @@ def optimize_ballistic_from_origin_reprojection(
     upper = np.array([45.0, 15.0, 25.0], dtype=np.float64)
     current = np.clip(current, lower, upper)
 
-    def compose_params(velocities):
-        return (
+    def residuals(velocities):
+        params = (
             float(origin_point[0]),
             float(velocities[0]),
             float(origin_point[1]),
             float(velocities[1]),
             float(origin_point[2]),
             float(velocities[2]),
+            float(k_drag),
         )
-
-    def objective(velocities):
-        params = compose_params(velocities)
         mean_err, _, _ = compute_fit_reprojection_errors_px(
             params,
             origin_time_sec,
@@ -450,46 +522,29 @@ def optimize_ballistic_from_origin_reprojection(
             image_points_right,
             camera_configs,
         )
-        return float(np.average(mean_err ** 2, weights=point_weights))
+        return residual_scale * mean_err
 
-    best_score = objective(current)
-    step = np.array([0.55, 1.1, 0.95], dtype=np.float64)
-    rng = np.random.default_rng(123)
+    try:
+        result = least_squares(
+            residuals,
+            current,
+            bounds=(lower, upper),
+            x_scale="jac",
+            max_nfev=200,
+        )
+        current = result.x
+    except (ValueError, np.linalg.LinAlgError):
+        pass
 
-    for _ in range(14):
-        improved = False
-        for axis in range(len(current)):
-            axis_best = current.copy()
-            axis_best_score = best_score
-            for direction in (-1.0, 1.0):
-                trial = current.copy()
-                trial[axis] = np.clip(
-                    trial[axis] + direction * step[axis],
-                    lower[axis],
-                    upper[axis],
-                )
-                score = objective(trial)
-                if score < axis_best_score:
-                    axis_best = trial
-                    axis_best_score = score
-            if axis_best_score < best_score:
-                current = axis_best
-                best_score = axis_best_score
-                improved = True
-
-        for _ in range(20):
-            trial = np.clip(current + rng.normal(scale=step, size=current.shape), lower, upper)
-            score = objective(trial)
-            if score < best_score:
-                current = trial
-                best_score = score
-                improved = True
-
-        step *= 0.8 if improved else 0.5
-        if float(np.max(step)) < 1e-3:
-            break
-
-    return compose_params(current)
+    return (
+        float(origin_point[0]),
+        float(current[0]),
+        float(origin_point[1]),
+        float(current[1]),
+        float(origin_point[2]),
+        float(current[2]),
+        float(k_drag),
+    )
 
 def detect_goal_line_crossing(times, points, goal_line_y=GOAL_LINE_Y):
     times = np.asarray(times, dtype=np.float64)
@@ -596,11 +651,30 @@ def calculate_inlier_threshold_px(reprojection_errors):
 
 
 def select_flight_prefix_length(times, points, base_weights):
+    """选出"单弹道模型仍成立"的飞行前缀长度（change-point 判定）。
+
+    经验证，最稳的锚是"全局最小 RMSE"：最小二乘下短段残差天然偏小，
+    所以以 min-RMSE 为基准、向后容许一个宽裕的**相对增长**阈值，能
+    在纯弹道上走到很长的前缀，而在弹地/反弹拐点处残差的相对跳升会
+    超过阈值从而截断。原实现的硬编码 `best_rmse*1.6 + 0.03` 与之等效，
+    但两个系数都是常数，不随轨迹特征自适应。这里做保守增强：
+
+    1) 相对阈值从固定 1.6× 改为对轨迹速度自适应：快球段的随机扫描
+       噪声随点间距放大，宽容带应更宽，避免把"正常加长"误判为新段。
+    2) 绝对容差 +0.03 改为相对 a·median_rmse + 绝对小量，避免慢速大
+       动态段的绝对项过早截断。
+    3) 保留原结构（min-RMSE 锚 + 向后容纳），仅在拐点处截断。
+    """
     if len(times) <= 18:
         return len(times)
 
-    candidates = []
-    for end in range(18, len(times) + 1):
+    n_max = len(times)
+    start = 18
+    if n_max <= start:
+        return n_max
+
+    scored = []      # {end, rmse, z0, peak_height, residuals}
+    for end in range(start, n_max + 1):
         cur_times = times[:end]
         cur_points = points[:end]
         cur_weights = base_weights[:end]
@@ -612,31 +686,65 @@ def select_flight_prefix_length(times, points, base_weights):
         z0 = float(params[4])
         vz = float(params[5])
         peak_height = z0 + (vz * vz) / (2.0 * GRAVITY) if vz > 0.0 else z0
-        candidates.append(
-            {
-                "end": end,
-                "rmse": rmse,
-                "z0": z0,
-                "peak_height": peak_height,
-            }
-        )
+        if z0 < -0.05 or peak_height > 4.5 or not np.isfinite(rmse):
+            continue
+        scored.append({"end": end, "rmse": rmse, "z0": z0,
+                       "peak_height": peak_height, "residuals": residuals})
 
-    valid = [
-        cand for cand in candidates
-        if cand["z0"] >= -0.05 and cand["rmse"] <= 1.0 and cand["peak_height"] <= 4.5
-    ]
-    if not valid:
-        return len(times)
+    if not scored:
+        return n_max
 
-    best_rmse = min(cand["rmse"] for cand in valid)
-    divergence_threshold = max(best_rmse * 1.6, best_rmse + 0.03)
-    selected_end = valid[0]["end"]
-    for cand in valid:
-        if cand["rmse"] <= divergence_threshold:
-            selected_end = cand["end"]
+    # 速度自适应相对阈值：快球（点间距大）宽容带更宽，慢球更紧。
+    # dt 均值 × 特征速度估计段内最大点间距，据此缩放相对阈值。
+    rel_scale = _prefix_speed_scale(times, points)
+    best_rmse = min(item["rmse"] for item in scored)
+    # 相对容差：基础 0.6 × rel_scale（快球更宽），下限 0.4 还原 1.4× 量级，上限 1.6
+    rel_threshold = min(1.6, max(0.4, 0.6 * rel_scale))
+    divergence_threshold = max(best_rmse * (1.0 + rel_threshold), best_rmse + 0.02)
+
+    selected_end = scored[0]["end"]
+    for item in scored:
+        if item["rmse"] <= divergence_threshold:
+            selected_end = item["end"]
         else:
             break
+    selected_end = int(selected_end)
+
+    # 末端离群兜底：截断不是全长时，确认末尾点不是新段起点（残差放大）。
+    if selected_end < n_max and selected_end > start:
+        combined = None
+        for item in scored:
+            if item["end"] == selected_end:
+                combined = item
+                break
+        if combined is not None:
+            tail_ratio = float(np.mean(combined["residuals"][-3:]) / max(combined["rmse"], 1e-9))
+            if tail_ratio > 1.8:
+                before = [it for it in scored if it["end"] < selected_end]
+                if before:
+                    selected_end = int(before[-1]["end"])
     return int(selected_end)
+
+
+def _prefix_speed_scale(times, points):
+    """返回一个缩放因子：轨迹特征速度越快 → 值越大（放宽相对容差）。
+
+    用起始段的平均速度近似段内空间跨度。快球时相邻点更远，同样的
+    像素/噪声扰动在 3D 残差上被放大，需要更宽容的相对阈值。返回
+    设置在 [1.0, 3.0] 区间，避免过窄或过宽。
+    """
+    ts = np.asarray(times, dtype=np.float64)
+    pts = np.asarray(points, dtype=np.float64)
+    if len(ts) < 3 or len(pts) < 3:
+        return 1.0
+    dt = float(np.median(np.diff(ts)))
+    if dt <= 1e-6:
+        return 1.0
+    # 前 6 段平均速度
+    seg = min(6, len(ts) - 1)
+    speed = float(np.mean(np.linalg.norm(np.diff(pts[:seg + 1], axis=0), axis=1) / dt))
+    # 20 m/s 内近似线性映射，clamp 到 [1.0, 3.0]
+    return float(max(1.0, min(3.0, 1.0 + speed / 10.0)))
 
 
 
@@ -675,6 +783,7 @@ def fit_rebound_ballistic_segment(
     landing_point,
     cross_time_sec,
     cross_point,
+    k_drag=0.0,
 ):
     if landing_time_sec is None or landing_point is None or cross_time_sec is None:
         return None
@@ -747,6 +856,7 @@ def fit_rebound_ballistic_segment(
                 obs_confidences_left,
                 obs_confidences_right,
                 camera_configs,
+                k_drag=k_drag,
             )
             fitted_obs = evaluate_ballistic(params, obs_times, origin_time_sec)
             residuals = np.linalg.norm(obs_points - fitted_obs, axis=1)
@@ -885,6 +995,11 @@ def optimize_ground_rollout_reprojection(
     camera_configs,
     init_accelerations,
 ):
+    """地面滚动段（端点约束二次曲线）的加速度有界最小二乘拟合。
+
+    原目标里的地下球心罚项以附加残差块并入 TRF：r_z = √(220·w_i)·
+    max(|z_i - R| - 0.08, 0)，与重投影残差同解。
+    """
     tau = np.asarray(tau, dtype=np.float64)
     image_points_left = np.asarray(image_points_left, dtype=np.float64)
     image_points_right = np.asarray(image_points_right, dtype=np.float64)
@@ -892,13 +1007,15 @@ def optimize_ground_rollout_reprojection(
     conf_left = np.clip(np.asarray(confidences_left, dtype=np.float64), 0.05, 1.0)
     conf_right = np.clip(np.asarray(confidences_right, dtype=np.float64), 0.05, 1.0)
     point_weights = np.clip(base_weights * np.sqrt(conf_left * conf_right), 1e-8, None)
+    residual_scale = np.sqrt(point_weights) * 0.5
+    z_penalty_scale = np.sqrt(220.0 * point_weights)
 
     current = np.asarray(init_accelerations, dtype=np.float64).reshape(3)
     lower = np.array([-30.0, -30.0, -40.0], dtype=np.float64)
     upper = np.array([30.0, 30.0, 40.0], dtype=np.float64)
     current = np.clip(current, lower, upper)
 
-    def objective(accelerations):
+    def residuals(accelerations):
         world_points, _ = evaluate_endpoint_constrained_quadratic(start_point, end_point, tau, tau_end, accelerations)
         mean_err, _, _ = compute_world_reprojection_errors_px(
             world_points,
@@ -906,44 +1023,22 @@ def optimize_ground_rollout_reprojection(
             image_points_right,
             camera_configs,
         )
-        z_penalty = np.average(
-            np.maximum(np.abs(world_points[:, 2] - BALL_RADIUS_M) - 0.08, 0.0) ** 2,
-            weights=point_weights,
+        z_penalty = np.maximum(
+            np.abs(world_points[:, 2] - BALL_RADIUS_M) - 0.08, 0.0
         )
-        return float(np.average(mean_err ** 2, weights=point_weights) + 220.0 * z_penalty)
+        return np.concatenate([residual_scale * mean_err, z_penalty_scale * z_penalty])
 
-    best_score = objective(current)
-    step = np.array([1.4, 1.8, 2.0], dtype=np.float64)
-    rng = np.random.default_rng(321)
-
-    for _ in range(14):
-        improved = False
-        for axis in range(len(current)):
-            axis_best = current.copy()
-            axis_best_score = best_score
-            for direction in (-1.0, 1.0):
-                trial = current.copy()
-                trial[axis] = np.clip(trial[axis] + direction * step[axis], lower[axis], upper[axis])
-                score = objective(trial)
-                if score < axis_best_score:
-                    axis_best = trial
-                    axis_best_score = score
-            if axis_best_score < best_score:
-                current = axis_best
-                best_score = axis_best_score
-                improved = True
-
-        for _ in range(20):
-            trial = np.clip(current + rng.normal(scale=step, size=current.shape), lower, upper)
-            score = objective(trial)
-            if score < best_score:
-                current = trial
-                best_score = score
-                improved = True
-
-        step *= 0.8 if improved else 0.5
-        if float(np.max(step)) < 1e-3:
-            break
+    try:
+        result = least_squares(
+            residuals,
+            current,
+            bounds=(lower, upper),
+            x_scale="jac",
+            max_nfev=200,
+        )
+        current = result.x
+    except (ValueError, np.linalg.LinAlgError):
+        pass
 
     return current
 
@@ -1075,6 +1170,42 @@ def fit_ground_rollout_segment(
         'dense_points': dense_points,
         'rmse_m': rmse_m,
     }
+
+
+def _solve_ground_crossing(params, time_origin_sec, bracket_lo, bracket_hi, fallback_tau):
+    """数值求 z(τ)=R 的根；括号失效或积分失败时回退纯重力闭式解。"""
+
+    def f(t_abs):
+        point = evaluate_ballistic(params, np.array([float(t_abs)]), time_origin_sec)[0]
+        return float(point[2]) - BALL_RADIUS_M
+
+    try:
+        lo_f, hi_f = f(bracket_lo), f(bracket_hi)
+        if not (np.isfinite(lo_f) and np.isfinite(hi_f)) or lo_f * hi_f > 0.0:
+            return float(fallback_tau)
+        return float(brentq(f, bracket_lo, bracket_hi, xtol=1e-6))
+    except (ValueError, RuntimeError):
+        return float(fallback_tau)
+
+
+def _solve_drag_peak_time(params, time_origin_sec, upper_tau, fallback_tau):
+    """阻力弹道的最高点时刻（数值有界极小化），失败回退纯重力估计。"""
+
+    def neg_height(t_rel):
+        point = evaluate_ballistic(params, np.array([float(t_rel)]), time_origin_sec)[0]
+        return -float(point[2])
+
+    try:
+        search = minimize_scalar(
+            neg_height,
+            bounds=(0.0, max(0.02, float(upper_tau) * 0.95)),
+            method="bounded",
+        )
+        if np.isfinite(search.x):
+            return float(search.x)
+    except (ValueError, RuntimeError):
+        pass
+    return float(fallback_tau)
 
 
 def fit_ballistic_trajectory(trajectory, camera_configs):
@@ -1258,26 +1389,59 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
     # silently replaced by an earlier (stale) one just to make the fit look good.
     mask = final_mask
 
-    # 纯重力抛物线模型（空气阻力模型已废弃移除）
-    x0, vx, y0, vy, z0, vz = params[:6]
-    k_drag = None
-    tau_peak = max(0.0, vz / GRAVITY)
-    peak_time_sec = time_origin_sec + tau_peak
-    peak_point = evaluate_ballistic(params, np.array([peak_time_sec], dtype=np.float64), time_origin_sec)[0]
+    # 参数化：params[:6] 为 origin 处标准弹道参数，params[6] 为阻力系数 k
+    x0, vx, y0, vy, z0, vz = [float(v) for v in params[:6]]
+    k_drag = float(params[6]) if len(params) > 6 else 0.0
+    use_drag_model = k_drag > DRAG_EPS
+
+    disc = vz * vz + 2.0 * GRAVITY * (z0 - BALL_RADIUS_M)
+    tau_launch_closed = None
+    tau_land_closed = None
+    if disc >= 0.0:
+        sqrt_disc = math.sqrt(disc)
+        tau_launch_closed = (vz - sqrt_disc) / GRAVITY
+        tau_land_closed = (vz + sqrt_disc) / GRAVITY
 
     landing_time_sec = None
     landing_point = None
     launch_time_sec = None
-    disc = vz * vz + 2.0 * GRAVITY * (z0 - BALL_RADIUS_M)
-    if disc >= 0.0:
-        sqrt_disc = math.sqrt(disc)
-        tau_launch = (vz - sqrt_disc) / GRAVITY
-        if tau_launch <= 0.0:
-            launch_time_sec = time_origin_sec + tau_launch
-        tau_land = (vz + sqrt_disc) / GRAVITY
-        if tau_land >= 0.0:
-            landing_time_sec = time_origin_sec + tau_land
-            landing_point = evaluate_ballistic(params, np.array([landing_time_sec], dtype=np.float64), time_origin_sec)[0]
+    if tau_land_closed is not None and tau_land_closed >= 0.0:
+        if use_drag_model:
+            # 阻力使下落段更快到达地面：在闭式解附近数值求根
+            tau_land = _solve_ground_crossing(
+                params,
+                time_origin_sec,
+                time_origin_sec + max(0.05, 0.5 * max(0.0, vz) / GRAVITY),
+                time_origin_sec + tau_land_closed * 1.5 + 0.3,
+                tau_land_closed,
+            )
+        else:
+            tau_land = tau_land_closed
+        landing_time_sec = time_origin_sec + tau_land
+        landing_point = evaluate_ballistic(params, np.array([landing_time_sec], dtype=np.float64), time_origin_sec)[0]
+    if tau_launch_closed is not None and tau_launch_closed <= 0.0:
+        if use_drag_model:
+            tau_launch = _solve_ground_crossing(
+                params,
+                time_origin_sec,
+                time_origin_sec + tau_launch_closed * 2.0,
+                time_origin_sec + tau_launch_closed * 0.5,
+                tau_launch_closed,
+            )
+        else:
+            tau_launch = tau_launch_closed
+        launch_time_sec = time_origin_sec + tau_launch
+
+    if use_drag_model:
+        tau_peak = _solve_drag_peak_time(
+            params, time_origin_sec,
+            tau_land_closed if tau_land_closed is not None else max(0.0, vz) / GRAVITY,
+            max(0.0, vz) / GRAVITY,
+        )
+    else:
+        tau_peak = max(0.0, vz / GRAVITY)
+    peak_time_sec = time_origin_sec + tau_peak
+    peak_point = evaluate_ballistic(params, np.array([peak_time_sec], dtype=np.float64), time_origin_sec)[0]
 
     observed_goal_line_crossing_time_sec, observed_goal_line_crossing_point = detect_goal_line_crossing(full_times, full_points)
     observed_goal_line_crossing_phase = classify_goal_line_phase(
@@ -1336,6 +1500,7 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
             landing_point,
             observed_goal_line_crossing_time_sec,
             observed_goal_line_crossing_point,
+            k_drag=k_drag,
         )
         if rebound_fit is not None and len(rebound_fit['dense_times']) > 0:
             post_landing_model = 'rebound_ballistic'
@@ -1425,7 +1590,7 @@ def fit_ballistic_trajectory(trajectory, camera_configs):
         vz=vz,
         gravity=GRAVITY,
         k_drag=k_drag,
-        use_drag_model=False,
+        use_drag_model=use_drag_model,
         rmse_m=rmse_m,
         max_residual_m=max_residual_m,
         reprojection_rmse_px=reprojection_rmse_px,
@@ -1519,6 +1684,11 @@ def save_summary(path, fit):
             "reprojection_threshold_px": calculate_inlier_threshold_px(fit.fit_reprojection_errors_px),
         },
         "gravity_mps2": float(fit.gravity),
+        "drag_model": {
+            "enabled": bool(fit.use_drag_model),
+            "k_per_m": None if fit.k_drag is None else float(fit.k_drag),
+            "k_upper_bound_per_m": DRAG_K_MAX,
+        },
         "x0_m": float(fit.x0),
         "vx_mps": float(fit.vx),
         "y0_m": float(fit.y0),
@@ -1670,7 +1840,11 @@ def process_sample(sample_name):
         reprojection_errors=fit.reprojection_errors,
         offset_seconds=np.array([fit.offset_seconds], dtype=np.float64),
         time_origin_sec=np.array([fit.time_origin_sec], dtype=np.float64),
-        ballistic_params=np.array([fit.x0, fit.vx, fit.y0, fit.vy, fit.z0, fit.vz, fit.gravity], dtype=np.float64),
+        ballistic_params=np.array(
+            [fit.x0, fit.vx, fit.y0, fit.vy, fit.z0, fit.vz, fit.gravity,
+             0.0 if fit.k_drag is None else float(fit.k_drag)],
+            dtype=np.float64,
+        ),
         goal_line_crossing_detected=np.array([int(fit.goal_line_crossing_point is not None)], dtype=np.uint8),
         goal_line_crossing_time_sec=np.array(
             [np.nan if fit.goal_line_crossing_time_sec is None else fit.goal_line_crossing_time_sec],

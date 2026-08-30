@@ -109,11 +109,14 @@ def record_online(cam_left, cam_right, sample_name, workspace, pipeline_dir):
     package_root = str(pipeline_dir.parent).replace("\\", "\\\\")
     cam_left = str(cam_left).replace("\\", "\\\\")
     cam_right = str(cam_right).replace("\\", "\\\\")
+    # 预览帧发布目录：WPF 端从 <workspace>/output/live_preview 读取实时画面。
+    preview_dir = str(Path(workspace).resolve() / "output" / "live_preview").replace("\\", "\\\\")
     bootstrap = (
         "import sys; "
         f"sys.path.insert(0, r'{package_root}'); "
         "from project.camera_capture import DualCameraRecorder; "
-        f"rec = DualCameraRecorder(r'{cam_left}', r'{cam_right}', r'{sample_dir}'); "
+        f"rec = DualCameraRecorder(r'{cam_left}', r'{cam_right}', r'{sample_dir}', "
+        f"preview_dir=r'{preview_dir}', preview_size=(1280, 720)); "
         "sys.exit(0 if rec.start() else 3)"
     )
     return subprocess.run([sys.executable, "-c", bootstrap],
@@ -208,6 +211,7 @@ def main():
             "--imgsz", str(args.imgsz),
             "--conf", str(args.conf),
             "--analyze-every", str(args.analyze_every),
+            "--preview-dir", str(Path(ws).resolve() / "output" / "live_preview"),
         ]
         if args.no_save:
             sa.append("--no-save")

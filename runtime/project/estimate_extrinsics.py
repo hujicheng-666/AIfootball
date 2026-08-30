@@ -404,6 +404,75 @@ def try_solve_pnp_ransac(object_points, image_points, camera_matrix, dist_coeffs
     }
 
 
+def try_solve_ippe_plane(object_points, image_points, camera_matrix, dist_coeffs, plane_eps=1e-3):
+    """用 RO 地面共面子集做闭式全局最优求解（IPPE），返回候选或 None。
+
+    参考点里门柱底两点、罚球点、小禁区角共 4 点落在 z=0 地面平面，
+    cv2.SOLVEPNP_IPPE 是该平面 PnP 的闭式全局最优解算器（相对平面内
+    的两义解取投影误差更小者），比 EPNP/SQPNP 对共面配置更稳、无局部
+    极小。求解结果作为初始位姿，再用**全部点**（含离面门柱顶）做鲁棒
+    精化——IPPE 负责给出一个可信的共面初值，精化负责吸收离面点。
+
+    注意：IPPE 要求所有"传入的" objectPoints 严格共面，故这里只喂
+    ground 子集；离面点仅在之后的 refine_pose_robust 中使用。
+    """
+    obj = np.asarray(object_points, dtype=np.float64).reshape(-1, 3)
+    if obj.shape[0] < 4:
+        return None
+    # 挑共面（z≈0）子集
+    ground_mask = np.abs(obj[:, 2]) <= plane_eps
+    if int(ground_mask.sum()) < 4:
+        return None
+    ground_obj = obj[ground_mask]
+    ground_img = np.asarray(image_points, dtype=np.float64).reshape(-1, 2)[ground_mask]
+    if ground_obj.shape[0] < 4:
+        return None
+
+    # 共面判定：IPPE 要求同一平面，跳过异面情形
+    if not hasattr(cv2, "SOLVEPNP_IPPE"):
+        return None
+
+    best = None
+    for use_guess, rvec0 in ((False, None),):
+        try:
+            if use_guess:
+                ok, rvec, tvec = cv2.solvePnP(
+                    objectPoints=ground_obj, imagePoints=ground_img,
+                    cameraMatrix=camera_matrix, distCoeffs=dist_coeffs,
+                    rvec=rvec0, tvec=np.zeros((3, 1)),
+                    flags=cv2.SOLVEPNP_IPPE)
+            else:
+                ok, rvec, tvec = cv2.solvePnP(
+                    objectPoints=ground_obj, imagePoints=ground_img,
+                    cameraMatrix=camera_matrix, distCoeffs=dist_coeffs,
+                    flags=cv2.SOLVEPNP_IPPE)
+        except cv2.error:
+            continue
+        if not ok:
+            continue
+        # IPPE 返回相对 ground 平面的位姿；ground 平面即世界 z=0 平面，
+        # 因为 objectPoints 已是世界坐标，故 rvec/tvec 即世界系位姿。
+        # 用全部点（含离面门柱顶）做鲁棒精化。
+        rvec_r, tvec_r = refine_pose_robust(
+            object_points, image_points, camera_matrix, dist_coeffs, rvec, tvec)
+        # 过滤明显跑到门后的解（相机应在 y>0 的场地同侧）
+        C = -cv2.Rodrigues(rvec_r)[0].T @ tvec_r
+        if C[1] < 0:
+            continue
+        score = pose_robust_score(object_points, image_points, camera_matrix,
+                                  dist_coeffs, rvec_r, tvec_r)
+        if best is None or score < best["score"]:
+            best = {
+                "solver_name": "solvePnP(IPPE) + robust all-points refine",
+                "rvec": rvec_r,
+                "tvec": tvec_r,
+                "inliers": np.arange(len(ground_obj)),
+                "score": score,
+                "_ippe": True,
+            }
+    return best
+
+
 def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs, view_type="shooter_left"):
     methods = [
         (cv2.SOLVEPNP_EPNP, "solvePnPRansac(EPNP)", 8.0),
@@ -426,6 +495,17 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
         if result is not None:
             ransac_candidates.append(result)
 
+    # IPPE 共面全局最优假设：4 个地面点闭式求解 + 全点鲁棒精化。
+    # 与上方 EPNP/SQPNP 并列为一个候选，进入统一 pose_robust_score 评选，
+    # 不会破坏原流程，仅在共面配置下提供更稳的初值。
+    try:
+        ippe_candidate = try_solve_ippe_plane(
+            object_points, image_points, camera_matrix, dist_coeffs)
+        if ippe_candidate is not None:
+            ransac_candidates.append(ippe_candidate)
+    except Exception:
+        pass
+
     if ransac_candidates:
         # RANSAC proposes hypotheses only.  Evaluate every proposal against
         # every reference point and robustly refine it before committing a
@@ -433,17 +513,23 @@ def estimate_extrinsics(object_points, image_points, camera_matrix, dist_coeffs,
         # dependent and can preserve a local, low-support solution.
         evaluated = []
         for candidate in ransac_candidates:
-            for suffix, rvec, tvec in (
-                ("", candidate["rvec"], candidate["tvec"]),
-                (" + robust all-points refine", *refine_pose_robust(
-                    object_points,
-                    image_points,
-                    camera_matrix,
-                    dist_coeffs,
-                    candidate["rvec"],
-                    candidate["tvec"],
-                )),
-            ):
+            if candidate.get("_ippe"):
+                # IPPE 候选已在 try_solve_ippe_plane 内做过全点鲁棒精化，
+                # 这里直接入评，避免二次精化改变其共面初值特性。
+                variants = [("", candidate["rvec"], candidate["tvec"])]
+            else:
+                variants = [
+                    ("", candidate["rvec"], candidate["tvec"]),
+                    (" + robust all-points refine", *refine_pose_robust(
+                        object_points,
+                        image_points,
+                        camera_matrix,
+                        dist_coeffs,
+                        candidate["rvec"],
+                        candidate["tvec"],
+                    )),
+                ]
+            for suffix, rvec, tvec in variants:
                 evaluated.append({
                     "solver_name": candidate["solver_name"] + suffix,
                     "rvec": rvec,

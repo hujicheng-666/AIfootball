@@ -1,6 +1,10 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.Text.RegularExpressions;
+using System.IO;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using AIfootball.App.Models;
 using AIfootball.App.Services.Interfaces;
 
@@ -137,6 +141,81 @@ public class PipelineViewModel : ViewModelBase
     {
         get => _isLiveAnalysis;
         set => SetProperty(ref _isLiveAnalysis, value);
+    }
+
+    // ─── 在线实时预览（Python 每帧写 output/live_preview/*.jpg，WPF 定时读取显示）───
+    private ImageSource? _livePreviewLeft;
+    public ImageSource? LivePreviewLeft
+    {
+        get => _livePreviewLeft;
+        set => SetProperty(ref _livePreviewLeft, value);
+    }
+
+    private ImageSource? _livePreviewRight;
+    public ImageSource? LivePreviewRight
+    {
+        get => _livePreviewRight;
+        set => SetProperty(ref _livePreviewRight, value);
+    }
+
+    private bool _isPreviewVisible;
+    public bool IsPreviewVisible
+    {
+        get => _isPreviewVisible;
+        set => SetProperty(ref _isPreviewVisible, value);
+    }
+
+    private DispatcherTimer? _previewTimer;
+
+    private string PreviewDirectory =>
+        Path.Combine(_pythonEngine.WorkspaceDir, "output", "live_preview");
+
+    /// <summary>启动定时刷新预览：约 20fps 读取 Python 写的最新 JPEG。</summary>
+    private void StartLivePreview()
+    {
+        if (_previewTimer != null) return;
+        _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
+        _previewTimer.Tick += (_, _) => RefreshLivePreview();
+        _previewTimer.Start();
+        IsPreviewVisible = true;
+    }
+
+    private void StopLivePreview()
+    {
+        _previewTimer?.Stop();
+        _previewTimer = null;
+        IsPreviewVisible = false;
+        LivePreviewLeft = null;
+        LivePreviewRight = null;
+    }
+
+    private void RefreshLivePreview()
+    {
+        LoadPreviewFrame("left");
+        LoadPreviewFrame("right");
+    }
+
+    private void LoadPreviewFrame(string side)
+    {
+        var path = Path.Combine(PreviewDirectory, $"live_preview_{side}.jpg");
+        try
+        {
+            if (!File.Exists(path)) return;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (stream.Length == 0) return;
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.StreamSource = stream;
+            bmp.EndInit();
+            bmp.Freeze(); // 供跨线程 UI 使用
+            if (side == "left") LivePreviewLeft = bmp;
+            else LivePreviewRight = bmp;
+        }
+        catch
+        {
+            // 预览失败忽略，不阻塞录制
+        }
     }
 
     // ─── 步骤进度 ───
@@ -303,6 +382,8 @@ public class PipelineViewModel : ViewModelBase
         ProcessingProgress = 0;
         ProcessingProgressText = "等待采集任务启动";
         _mainVm.SetPipelineState(1, "双摄采集中");
+        // 启动实时预览：Python 录制时每帧写 JPEG，WPF 定时读到 Image 显示
+        StartLivePreview();
 
         _mainVm.AddLog("info", $"======== 在线录制: {SampleName} ========");
 
@@ -342,6 +423,7 @@ public class PipelineViewModel : ViewModelBase
         }
         finally
         {
+            StopLivePreview();
             IsRunning = false;
             _cts?.Dispose();
             _cts = null;

@@ -59,3 +59,14 @@ _git*.txt
 _git*.log
 _proc.txt
 _ghcreate.txt
+
+# --- 本地/装机辅助文件（不进仓库，仅本机保留）---
+.agents/
+AGENT.md
+DSH-Desktop-*.exe
+download-update.mjs
+install-log.txt
+install-run.ps1
+assets/icons/AIfootball.previous.ico
+4a*.jpg
+samples/sample_live/

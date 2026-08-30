@@ -59,6 +59,7 @@ class CalibrationResult:
     mean_error: float
     camera_matrix: np.ndarray
     dist_coeffs: np.ndarray
+    intrinsics_uncertainty: dict | None = None
 
 
 def build_object_points():
@@ -420,6 +421,10 @@ def robust_calibrate(objp, candidates, img_size, min_retained_count):
         objpoints = [objp.copy() for _ in active_candidates]
         imgpoints = [item["corners"] for item in active_candidates]
         flags = cv2.CALIB_USE_INTRINSIC_GUESS if camera_matrix is not None else 0
+        # 固定 k3=0：只用 k1,k2,p1,p2。高阶 k3 在棋盘格未覆盖的
+        # 图像右侧/下缘/四角会外推失控（曾解出 k3≈31/41 的病态值），
+        # 固定后畸变模型温和得多，边缘/角落不再爆炸。
+        flags |= cv2.CALIB_FIX_K3
         rms, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
             objpoints,
             imgpoints,
@@ -456,6 +461,81 @@ def robust_calibrate(objp, candidates, img_size, min_retained_count):
         rejection_rounds += 1
 
     raise AssertionError("Unreachable robust calibration state")
+
+
+def estimate_intrinsics_uncertainty(
+    objpoints,
+    imgpoints,
+    camera_matrix,
+    dist_coeffs,
+    rvecs,
+    tvecs,
+    rms,
+    fixed_k3=True,
+):
+    """估计内参不确定度 σ(fx,fy,cx,cy,k1,k2,p1,p2) —— 一阶灵敏度传播。
+
+    精确的数值 Hessian 逆在 OpenCV 标定里很脆弱：每个 view 的 rvec/tvec
+    是 nuisance，扰动内参时反复 re-PnP 会把"外参再优化"带来的曲率抹平，
+    σ 被严重低估且随收敛质量非单调。这里改为**一阶灵敏度传播**，更稳健
+    且保证噪声增大 → σ 单调增大：
+
+        σ_θ ≈ rms · sqrt( diag( (JᵀJ)^{-1} ) )
+
+    其中 J 是"所有 view 的重投影残差对 θ"的雅可比，θ 为内参参数
+    [fx,fy,cx,cy,k1,k2,p1,p2]，rms 是观测噪声尺度。对每个 view 用当前
+    已标定的 rvec/tvec（不再精化，避免抹平曲率），只对固定位姿下
+    θ 的扰动做中心差分求 J 的三列。
+
+    记号：J 为 (2*N_points, 8)，N_points 为所有 view 角点数之和。协方差
+    的经典高斯近似 Cov(θ) = σ²·(JᵀJ)^{-1}，std = sqrt(diag(Cov))。
+    """
+    labels = ["sigma_fx", "sigma_fy", "sigma_cx", "sigma_cy", "sigma_k1", "sigma_k2", "sigma_p1", "sigma_p2"]
+    # θ = [fx, fy, cx, cy, k1, k2, p1, p2]，k3 固定为 0，不参与。
+    n_dist = int(np.asarray(dist_coeffs).ravel().shape[0])
+    theta = np.array(
+        [float(camera_matrix[0, 0]), float(camera_matrix[1, 1]),
+         float(camera_matrix[0, 2]), float(camera_matrix[1, 2]),
+         float(dist_coeffs.ravel()[0]), float(dist_coeffs.ravel()[1]),
+         float(dist_coeffs.ravel()[2]), float(dist_coeffs.ravel()[3])],
+        dtype=np.float64,
+    )
+
+    def rebuild(theta_sub):
+        fx, fy, cx, cy, k1, k2, p1, p2 = [float(v) for v in theta_sub]
+        K = np.array([[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]], dtype=np.float64)
+        d = np.zeros(n_dist, dtype=np.float64)
+        d[:4] = [k1, k2, p1, p2]
+        dist = d.reshape(-1, 1) if np.asarray(dist_coeffs).ndim == 2 else d
+        return K, dist
+
+    def residuals(theta_sub):
+        K, dist = rebuild(theta_sub)
+        rows = []
+        for obj, img, rvec, tvec in zip(objpoints, imgpoints, rvecs, tvecs):
+            # 用已标定 rvec/tvec，不做 re-PnP（保持位姿固定，避免抹平曲率）
+            proj, _ = cv2.projectPoints(obj, rvec, tvec, K, dist)
+            rows.append((proj.reshape(-1, 2) - img).ravel())
+        return np.concatenate(rows) if rows else np.zeros((0,), dtype=np.float64)
+
+    base = residuals(theta)
+    n = len(theta)
+    J = np.zeros((len(base), n), dtype=np.float64)
+    dtheta = np.maximum(1e-3, 1e-4 * np.abs(theta))
+    for i in range(n):
+        ep = np.zeros(n, dtype=np.float64); ep[i] = dtheta[i]
+        J[:, i] = (residuals(theta + ep) - residuals(theta - ep)) / (2.0 * dtheta[i])
+
+    # Gauss-Newton/高斯近似协方差：Cov = σ²·(JᵀJ)^{-1}
+    sigma2 = float(rms) * float(rms)
+    info = J.T @ J
+    try:
+        cov = sigma2 * np.linalg.inv(info)
+    except np.linalg.LinAlgError:
+        # 伪逆兜底（有些参数可能弱可观，仍给出可用的量级）
+        cov = sigma2 * np.linalg.pinv(info)
+    std = np.sqrt(np.maximum(np.diag(cov), 0.0))
+    return dict(zip(labels, std.tolist()))
 
 
 def save_undistortion_example(sample_frame, camera_matrix, dist_coeffs, profile_name):
@@ -524,6 +604,16 @@ def calibrate_profile(profile_name, video_path, selection_fraction, max_selected
     sample_frame = load_frame_by_index(video_path, selected_candidates[0]["frame_index"])
     save_undistortion_example(sample_frame, camera_matrix, dist_coeffs, profile_name)
 
+    # 内参不确定度：用最终 K/dist 与全部保留 view 估计 σ(fx,fy,cx,cy,k1,k2,p1,p2)。
+    # 供下游三角测量传播误差（协方差加权）使用；失败则置 None 不阻塞标定。
+    intrinsics_uncertainty = None
+    try:
+        intrinsics_uncertainty = estimate_intrinsics_uncertainty(
+            objpoints, imgpoints, camera_matrix, dist_coeffs, rvecs, tvecs, rms,
+        )
+    except Exception as exc:
+        print(f"[{profile_name}] 不确定度估计失败（忽略）: {exc}")
+
     return CalibrationResult(
         profile_name=profile_name,
         video_path=video_path,
@@ -537,6 +627,7 @@ def calibrate_profile(profile_name, video_path, selection_fraction, max_selected
         mean_error=float(mean_error),
         camera_matrix=camera_matrix,
         dist_coeffs=dist_coeffs,
+        intrinsics_uncertainty=intrinsics_uncertainty,
     )
 
 
@@ -559,6 +650,13 @@ def save_profile_outputs(result):
         per_view_reprojection_errors=np.asarray(result.per_view_errors, dtype=np.float64),
         rejected_frame_indices=np.array([item["frame_index"] for item in result.rejected_candidates], dtype=np.int32),
     )
+    if result.intrinsics_uncertainty is not None:
+        # 追加不确定度到一个独立 npz，避免破坏 savez 的原子写
+        unc_path = OUTPUT_DIR / f"intrinsics_{result.profile_name}_uncertainty.npz"
+        np.savez(
+            unc_path,
+            **{k: np.array([v], dtype=np.float64) for k, v in result.intrinsics_uncertainty.items()},
+        )
 
     summary = {
         "profile_name": result.profile_name,
@@ -574,6 +672,7 @@ def save_profile_outputs(result):
         "mean_error": float(result.mean_error),
         "camera_matrix": result.camera_matrix.tolist(),
         "dist_coeffs": result.dist_coeffs.reshape(-1).tolist(),
+        "intrinsics_uncertainty": result.intrinsics_uncertainty,
         "corners_dir": str((CORNERS_ROOT_DIR / result.profile_name).resolve()),
         "selected_frames": [
             {

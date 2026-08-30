@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using AIfootball.App.Models;
 using AIfootball.App.Services.Interfaces;
 
@@ -27,7 +28,7 @@ public sealed class ShooterProfileService : IShooterProfileService
             : Array.Empty<string>();
 
         var signatures = new HashSet<string>(StringComparer.Ordinal);
-        var trajectories = new List<List<TrajectoryPoint>>();
+        var trajectories = new List<(string SampleName, List<TrajectoryPoint> Points)>();
         var duplicateCount = 0;
         var invalidCount = 0;
 
@@ -44,7 +45,7 @@ public sealed class ShooterProfileService : IShooterProfileService
                 duplicateCount++;
                 continue;
             }
-            trajectories.Add(trajectory);
+            trajectories.Add((Path.GetFileNameWithoutExtension(file), trajectory));
         }
 
         if (trajectories.Count == 0)
@@ -59,22 +60,16 @@ public sealed class ShooterProfileService : IShooterProfileService
         var center = 0;
         var right = 0;
 
-        foreach (var trajectory in trajectories)
+        foreach (var (sampleName, trajectory) in trajectories)
         {
-            var target = trajectory[0];
-            foreach (var point in trajectory)
-            {
-                // The training CSV uses x=0 as the goal line; select the closest sample.
-                if (MathF.Abs(point.Forward) < MathF.Abs(target.Forward))
-                    target = point;
-            }
+            var (targetLateral, targetHeight) = ResolveTargetPoint(sampleName, trajectory);
 
             totalSpeed += CalculateAverageSpeed(trajectory);
-            totalOffset += target.Lateral;
-            totalOffsetSquared += target.Lateral * target.Lateral;
-            totalHeight += target.Height;
-            if (target.Lateral > CenterLaneHalfWidth) left++;
-            else if (target.Lateral < -CenterLaneHalfWidth) right++;
+            totalOffset += targetLateral;
+            totalOffsetSquared += targetLateral * targetLateral;
+            totalHeight += targetHeight;
+            if (targetLateral > CenterLaneHalfWidth) left++;
+            else if (targetLateral < -CenterLaneHalfWidth) right++;
             else center++;
         }
 
@@ -94,6 +89,81 @@ public sealed class ShooterProfileService : IShooterProfileService
             DescribeHeight(totalHeight / count),
             DescribePower(totalSpeed / count),
             DescribeConsistency(spread));
+    }
+
+    /// <summary>
+    /// 解析一次射门的落点：优先用弹道拟合输出的门线交点（解析解），
+    /// 其次对 CSV 做跨线插值，最后回退到最贴近门线的采样点。
+    /// </summary>
+    private (float Lateral, float Height) ResolveTargetPoint(string sampleName, List<TrajectoryPoint> trajectory)
+    {
+        var crossing = TryReadBallisticCrossing(sampleName);
+        if (crossing.HasValue) return crossing.Value;
+        return InterpolateGoalLineCrossing(trajectory);
+    }
+
+    /// <summary>
+    /// 读取 Python 流水线弹道拟合的门线交点。data/<sample>_trajectory.csv 由
+    /// export_unity_trajectory.py 从 output/trajectory_ballistic/<sample>/ 导出，
+    /// summary 中的 goal_line_crossing 是弹道模型与门线平面的解析解，不受
+    /// 采样间隔影响（25 m/s 时相邻采样点间隔约 0.2 m）。
+    /// </summary>
+    private (float Lateral, float Height)? TryReadBallisticCrossing(string sampleName)
+    {
+        try
+        {
+            var summaryPath = Path.Combine(_engine.WorkspaceDir, "output",
+                "trajectory_ballistic", sampleName, "ballistic_fit_summary.json");
+            if (!File.Exists(summaryPath)) return null;
+
+            using var stream = File.OpenRead(summaryPath);
+            using var document = JsonDocument.Parse(stream);
+            if (!document.RootElement.TryGetProperty("goal_line_crossing", out var crossing))
+                return null;
+            if (!crossing.TryGetProperty("detected", out var detected)
+                || detected.ValueKind != JsonValueKind.True)
+                return null;
+            if (!crossing.TryGetProperty("point_xyz_m", out var point)
+                || point.ValueKind != JsonValueKind.Array)
+                return null;
+
+            var values = point.EnumerateArray().Select(v => v.GetSingle()).ToArray();
+            if (values.Length < 3 || !values.All(float.IsFinite)) return null;
+            // summary 是 Python 坐标：X=横向（Unity y，门将右侧为正）、Y=纵深、Z=高度
+            return (values[0], values[2]);
+        }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// 在门线附近对相邻采样点做线性插值，替代"最近单点"：曲线上两个采样点
+    /// 跨越 x=0 时，交点处的高度/横向由连续插值给出，消除采样量化误差。
+    /// </summary>
+    private static (float Lateral, float Height) InterpolateGoalLineCrossing(List<TrajectoryPoint> trajectory)
+    {
+        for (var index = 1; index < trajectory.Count; index++)
+        {
+            var a = trajectory[index - 1];
+            var b = trajectory[index];
+            if ((a.Forward > 0f) == (b.Forward > 0f)) continue;
+
+            var span = b.Forward - a.Forward;
+            if (MathF.Abs(span) < float.Epsilon) continue;
+            var alpha = (0f - a.Forward) / span;
+            if (alpha < 0f || alpha > 1f) continue;
+            return (a.Lateral + alpha * (b.Lateral - a.Lateral),
+                    a.Height + alpha * (b.Height - a.Height));
+        }
+
+        var target = trajectory[0];
+        foreach (var point in trajectory)
+        {
+            if (MathF.Abs(point.Forward) < MathF.Abs(target.Forward))
+                target = point;
+        }
+        return (target.Lateral, target.Height);
     }
 
     private static bool TryReadTrajectory(string path, out List<TrajectoryPoint> trajectory)

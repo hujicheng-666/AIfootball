@@ -119,10 +119,20 @@
     <!-- ============== 卡片样式 ============== -->
     <Style x:Key="Card" TargetType="Border">
         <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
-        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+        <Setter Property="BorderBrush" Value="#E3E9EF"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="CornerRadius" Value="10"/>
         <Setter Property="Padding" Value="20"/>
+        <!-- 柔和投影：让卡片从浅色背景浮起，呈现卡片式层次 -->
+        <Setter Property="Effect">
+            <Setter.Value>
+                <DropShadowEffect BlurRadius="16"
+                                  ShadowDepth="2"
+                                  Direction="270"
+                                  Color="#2E35414F"
+                                  Opacity="0.5"/>
+            </Setter.Value>
+        </Setter>
     </Style>
 
     <!-- ============== 输入框样式 ============== -->

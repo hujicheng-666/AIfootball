@@ -20,9 +20,9 @@
                 <RowDefinition Height="*" MinHeight="420"/>
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.25*"/>
+                <ColumnDefinition Width="1.3*"/>
                 <ColumnDefinition Width="16"/>
-                <ColumnDefinition Width="0.75*"/>
+                <ColumnDefinition Width="0.7*"/>
             </Grid.ColumnDefinitions>
 
             <!-- 页面标题 -->
@@ -252,6 +252,101 @@
                               IsChecked="{Binding IsLiveAnalysis}"
                               FontSize="13"
                               Margin="0,0,0,12"/>
+
+                    <!-- ============== 实时预览 ============== -->
+                    <StackPanel Margin="0,0,0,14"
+                                Visibility="{Binding IsPreviewVisible, Converter={StaticResource BoolToVis}}">
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="实时画面"
+                                       FontSize="13" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                       VerticalAlignment="Center"/>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                        VerticalAlignment="Center"
+                                        Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}">
+                                <Ellipse Width="8" Height="8" Margin="0,0,6,0"
+                                         Fill="#FFF03A3A" VerticalAlignment="Center"/>
+                                <TextBlock Text="LIVE" FontSize="11" FontWeight="Bold"
+                                           Foreground="#FFF03A3A"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- 左路预览 -->
+                            <Border Grid.Column="0" CornerRadius="8" ClipToBounds="True"
+                                    Background="#FF101318"
+                                    BorderThickness="1"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    MinHeight="150">
+                                <Grid>
+                                    <Image Source="{Binding LivePreviewLeft}"
+                                           Stretch="Uniform"
+                                           Margin="0"/>
+                                    <TextBlock Text="左摄像机 · 等待画面…"
+                                               Foreground="#AAFFFFFF" FontSize="12"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding LivePreviewLeft}" Value="{x:Null}">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="左 · 1280×720"
+                                               Foreground="#88FFFFFF" FontSize="10"
+                                               HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                               Margin="8,0,0,6"/>
+                                </Grid>
+                            </Border>
+
+                            <!-- 右路预览 -->
+                            <Border Grid.Column="2" CornerRadius="8" ClipToBounds="True"
+                                    Background="#FF101318"
+                                    BorderThickness="1"
+                                    BorderBrush="{StaticResource BorderBrush}"
+                                    MinHeight="150">
+                                <Grid>
+                                    <Image Source="{Binding LivePreviewRight}"
+                                           Stretch="Uniform"
+                                           Margin="0"/>
+                                    <TextBlock Text="右摄像机 · 等待画面…"
+                                               Foreground="#AAFFFFFF" FontSize="12"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding LivePreviewRight}" Value="{x:Null}">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="右 · 1280×720"
+                                               Foreground="#88FFFFFF" FontSize="10"
+                                               HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                                               Margin="8,0,0,6"/>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
 
                     <!-- 执行 -->
                     <Grid>

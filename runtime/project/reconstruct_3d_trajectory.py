@@ -287,12 +287,25 @@ def smooth_points(points, window=7):
     if len(points) < 3:
         return points.copy()
 
+    points = points.astype(np.float64)
     window = max(3, min(int(window), len(points)))
     half = window // 2
-    smoothed = points.astype(np.float64, copy=True)
-    for idx in range(len(points)):
+    smoothed = points.copy()
+    count = len(points)
+
+    if count >= window:
+        # 满窗行向量化：三角权重一次算好，sliding_window_view 免拷贝取窗
+        positions = np.arange(window, dtype=np.float64)
+        weights = np.clip(half + 1.0 - np.abs(positions - half), 1.0, None)
+        weights = weights / weights.sum()
+        windows = np.lib.stride_tricks.sliding_window_view(points, window, axis=0)
+        center_rows = np.arange(half, count - half)
+        smoothed[center_rows] = np.einsum("k,ifk->if", weights, windows)
+
+    # 边界行窗口被截断、权重随实际窗口宽度变化，保留逐点计算（至多 2*half 行）
+    for idx in list(range(min(half, count))) + list(range(max(half, count - half), count)):
         start = max(0, idx - half)
-        end = min(len(points), idx + half + 1)
+        end = min(count, idx + half + 1)
         segment = points[start:end]
         if len(segment) == 1:
             continue
@@ -431,6 +444,111 @@ def _predict_ball_position(history):
     return predicted, vel_mag
 
 
+class ConstantAccelerationFilter:
+    """2D 像素域匀加速(CA)卡尔曼滤波，替代二阶有限差分外推做逐帧预测。
+
+    线性高斯假设下的 MMSE 最优估计：状态 [x, y, vx, vy, ax, ay]，转移
+    矩阵用实际帧间隔；测量噪声直接使用检测端输出的中心协方差（YOLO
+    框尺度/圆度轮廓矩），过程噪声采用分段常白加速度模型。差分外推把
+    最近一次原始检测的差分当作真值，检测抖动被原样放大进预测与速度
+    自适应阈值；卡尔曼以协方差加权递归融合全部历史，对单帧抖动不敏感。
+    """
+
+    def __init__(self, acceleration_psd=4.0e6):
+        # 像素域重力投影加速度量级 ~f/depth·g ≈ 2e3 px/s²，PSD 取其平方
+        self.acceleration_psd = float(acceleration_psd)
+        self.state = None          # (6,) [x, y, vx, vy, ax, ay]，px、px/s
+        self.covariance = None     # (6, 6)
+        self.last_dt = 1.0 / 60.0
+
+    def reset(self):
+        self.state = None
+        self.covariance = None
+
+    @property
+    def initialized(self):
+        return self.state is not None
+
+    @staticmethod
+    def _transition(dt):
+        f = np.eye(6, dtype=np.float64)
+        f[0, 2] = dt
+        f[1, 3] = dt
+        f[0, 4] = 0.5 * dt * dt
+        f[1, 5] = 0.5 * dt * dt
+        f[2, 4] = dt
+        f[3, 5] = dt
+        return f
+
+    def _process_noise(self, dt):
+        q = self.acceleration_psd
+        block = q * np.array([
+            [dt ** 5 / 20.0, dt ** 4 / 8.0, dt ** 3 / 6.0],
+            [dt ** 4 / 8.0, dt ** 3 / 3.0, dt ** 2 / 2.0],
+            [dt ** 3 / 6.0, dt ** 2 / 2.0, dt],
+        ], dtype=np.float64)
+        noise = np.zeros((6, 6), dtype=np.float64)
+        noise[np.ix_([0, 2, 4], [0, 2, 4])] = block
+        noise[np.ix_([1, 3, 5], [1, 3, 5])] = block
+        return noise
+
+    def _propagate(self, dt):
+        s = self.state
+        s = np.array([
+            s[0] + s[2] * dt + 0.5 * s[4] * dt * dt,
+            s[1] + s[3] * dt + 0.5 * s[5] * dt * dt,
+            s[2] + s[4] * dt,
+            s[3] + s[5] * dt,
+            s[4],
+            s[5],
+        ], dtype=np.float64)
+        f = self._transition(dt)
+        self.state = s
+        self.covariance = f @ self.covariance @ f.T + self._process_noise(dt)
+
+    def predict_next(self, dt):
+        """推进到下一帧并返回 (预测中心, 速度幅值 px/frame)。
+
+        未初始化返回 (None, 0.0)。无检测帧连续调用即为纯外推：
+        状态按过程模型前进、协方差按 Q 增长，速度幅值来自滤波状态。
+        """
+        if self.state is None:
+            return None, 0.0
+        dt = max(float(dt), 1e-4)
+        self.last_dt = dt
+        self._propagate(dt)
+        speed_per_frame = float(np.hypot(self.state[2], self.state[3]) * dt)
+        return self.state[:2].copy(), speed_per_frame
+
+    def update(self, center, covariance):
+        """在已预测状态上融合一个检测（不再次推进时间）。"""
+        center = np.asarray(center, dtype=np.float64).reshape(2)
+        if covariance is None:
+            r = np.eye(2, dtype=np.float64) * 9.0
+        else:
+            r = np.asarray(covariance, dtype=np.float64).reshape(2, 2)
+            r = 0.5 * (r + r.T)
+        if not np.all(np.isfinite(r)) or np.linalg.det(r) <= 1e-9:
+            r = np.eye(2, dtype=np.float64) * 9.0
+
+        if self.state is None:
+            self.state = np.zeros(6, dtype=np.float64)
+            self.state[:2] = center
+            self.covariance = np.diag([25.0, 25.0, 1.0e6, 1.0e6, 1.0e8, 1.0e8])
+            return
+
+        h = np.zeros((2, 6), dtype=np.float64)
+        h[0, 0] = 1.0
+        h[1, 1] = 1.0
+        innovation = center - h @ self.state
+        s = h @ self.covariance @ h.T + r
+        gain = np.linalg.solve(s, h @ self.covariance).T
+        self.state = self.state + gain @ innovation
+        # Joseph 形式更新，协方差数值保正定
+        i_kh = np.eye(6) - gain @ h
+        self.covariance = i_kh @ self.covariance @ i_kh.T + gain @ r @ gain.T
+
+
 def _adaptive_ball_detect(model, frame, expected_center, penalty_center, imgsz, conf,
                           frame_w, frame_h, velocity_mag=0.0):
     """Adaptive multi-scale ball detection:
@@ -548,8 +666,14 @@ def _huber_cost(normalized_residual):
     return value * value if value <= 1.0 else 2.0 * value - 1.0
 
 
-def second_order_viterbi(state_rows, times, emission_cost, first_transition_cost,
-                         second_transition_cost):
+def _huber_cost_array(normalized_residuals):
+    """_huber_cost 的向量化版本（输入为非负或任意符号数组，取绝对值）。"""
+    value = np.abs(np.asarray(normalized_residuals, dtype=np.float64))
+    return np.where(value <= 1.0, value * value, 2.0 * value - 1.0)
+
+
+def second_order_viterbi(state_rows, times, emission_costs,
+                         first_transition_batch, second_transition_batch):
     """Find a global path with a second-order motion model.
 
     Each row contains alternatives for one observation time.  First-order
@@ -557,27 +681,29 @@ def second_order_viterbi(state_rows, times, emission_cost, first_transition_cost
     track that changes acceleration discontinuously; this dynamic programme
     carries the two preceding states so the entire sequence participates in
     every choice.
+
+    `emission_costs` is one cost array per row; the transition callbacks are
+    batched: `first_transition_batch(prev_states, cur_states, dt)` returns a
+    (Nprev, Ncur) matrix and `second_transition_batch(pp_states, prev_states,
+    cur_states, dt_previous, dt_current)` returns a (Npp, Nprev, Ncur) tensor,
+    so the O(T·K³) recurrence runs as one vectorised minimisation per step.
     """
     if not state_rows or any(len(row) == 0 for row in state_rows):
         return None
     if len(state_rows) == 1:
-        return [int(np.argmin([emission_cost(state) for state in state_rows[0]]))]
+        return [int(np.argmin(emission_costs[0]))]
 
-    first_costs = np.full((len(state_rows[0]), len(state_rows[1])), np.inf, dtype=np.float64)
     first_dt = max(float(times[1] - times[0]), 1e-4)
-    for first_index, first_state in enumerate(state_rows[0]):
-        for second_index, second_state in enumerate(state_rows[1]):
-            first_costs[first_index, second_index] = (
-                emission_cost(first_state)
-                + emission_cost(second_state)
-                + first_transition_cost(first_state, second_state, first_dt)
-            )
+    pair_costs = (
+        emission_costs[0][:, None]
+        + emission_costs[1][None, :]
+        + first_transition_batch(state_rows[0], state_rows[1], first_dt)
+    )
 
     if len(state_rows) == 2:
-        first_index, second_index = np.unravel_index(np.argmin(first_costs), first_costs.shape)
+        first_index, second_index = np.unravel_index(np.argmin(pair_costs), pair_costs.shape)
         return [int(first_index), int(second_index)]
 
-    pair_costs = first_costs
     parents = [None, None]
     for row_index in range(2, len(state_rows)):
         previous_previous_states = state_rows[row_index - 2]
@@ -585,29 +711,14 @@ def second_order_viterbi(state_rows, times, emission_cost, first_transition_cost
         current_states = state_rows[row_index]
         dt_previous = max(float(times[row_index - 1] - times[row_index - 2]), 1e-4)
         dt_current = max(float(times[row_index] - times[row_index - 1]), 1e-4)
-        next_costs = np.full((len(previous_states), len(current_states)), np.inf, dtype=np.float64)
-        parent_indices = np.full((len(previous_states), len(current_states)), -1, dtype=np.int32)
-        for previous_index, previous_state in enumerate(previous_states):
-            for current_index, current_state in enumerate(current_states):
-                best_cost = np.inf
-                best_parent = -1
-                for previous_previous_index, previous_previous_state in enumerate(previous_previous_states):
-                    candidate_cost = (
-                        pair_costs[previous_previous_index, previous_index]
-                        + second_transition_cost(
-                            previous_previous_state,
-                            previous_state,
-                            current_state,
-                            dt_previous,
-                            dt_current,
-                        )
-                    )
-                    if candidate_cost < best_cost:
-                        best_cost = candidate_cost
-                        best_parent = previous_previous_index
-                next_costs[previous_index, current_index] = best_cost + emission_cost(current_state)
-                parent_indices[previous_index, current_index] = best_parent
-        pair_costs = next_costs
+        transition = second_transition_batch(
+            previous_previous_states, previous_states, current_states,
+            dt_previous, dt_current,
+        )
+        total = pair_costs[:, :, None] + transition
+        parent_indices = np.argmin(total, axis=0)
+        best_cost = np.take_along_axis(total, parent_indices[None, :, :], axis=0)[0]
+        pair_costs = best_cost + emission_costs[row_index][None, :]
         parents.append(parent_indices)
 
     previous_index, current_index = np.unravel_index(np.argmin(pair_costs), pair_costs.shape)
@@ -666,26 +777,37 @@ def optimize_detection_path(detections, kick_frame, fps, frame_size):
         # candidate; the old relative-only score lost this information.
         return -0.45 * np.log(state["conf"]) + 0.10 * center_covariance_log_area(state["center_covariance"])
 
-    def first_transition(previous, current, dt):
-        frame_displacement = np.linalg.norm(current["center"] - previous["center"])
+    def first_transition_batch(previous_states, current_states, dt):
+        previous = np.asarray([state["center"] for state in previous_states], dtype=np.float64)
+        current = np.asarray([state["center"] for state in current_states], dtype=np.float64)
+        frame_displacement = np.linalg.norm(current[None, :, :] - previous[:, None, :], axis=-1)
         speed_px_per_sec = frame_displacement / dt
         # A weak guard only rejects implausible detector jumps; acceleration is
         # evaluated below by the actual second-order state transition.
         speed_limit = diagonal * fps * 0.12
-        return 0.05 * _huber_cost(frame_displacement / motion_scale_px) + 0.20 * _huber_cost(
-            max(0.0, speed_px_per_sec - speed_limit) / max(speed_limit, 1.0)
+        return 0.05 * _huber_cost_array(frame_displacement / motion_scale_px) + 0.20 * _huber_cost_array(
+            np.maximum(0.0, speed_px_per_sec - speed_limit) / max(speed_limit, 1.0)
         )
 
-    def second_transition(previous_previous, previous, current, dt_previous, dt_current):
-        predicted = previous["center"] + (
-            previous["center"] - previous_previous["center"]
-        ) * (dt_current / dt_previous)
-        residual = np.linalg.norm(current["center"] - predicted)
-        return 1.25 * _huber_cost(residual / motion_scale_px)
+    def second_transition_batch(previous_previous_states, previous_states, current_states,
+                                dt_previous, dt_current):
+        previous_previous = np.asarray([s["center"] for s in previous_previous_states], dtype=np.float64)
+        previous = np.asarray([s["center"] for s in previous_states], dtype=np.float64)
+        current = np.asarray([s["center"] for s in current_states], dtype=np.float64)
+        predicted = (
+            previous[None, :, None, :]
+            + (previous[None, :, None, :] - previous_previous[:, None, None, :])
+            * (dt_current / dt_previous)
+        )
+        residual = np.linalg.norm(current[None, None, :, :] - predicted, axis=-1)
+        return 1.25 * _huber_cost_array(residual / motion_scale_px)
 
     selected_indices = second_order_viterbi(
-        [row[1] for row in rows], np.asarray(row_times, dtype=np.float64),
-        emission, first_transition, second_transition,
+        [row[1] for row in rows],
+        np.asarray(row_times, dtype=np.float64),
+        [np.asarray([emission(state) for state in row[1]], dtype=np.float64) for row in rows],
+        first_transition_batch,
+        second_transition_batch,
     )
     if selected_indices is None:
         return {"enabled": True, "applied": False, "reason": "Viterbi path unavailable"}
@@ -879,6 +1001,8 @@ def detect_video_track(video_path, config, model, imgsz, conf):
     detections = []
     consecutive_miss = 0
     MAX_MISS = 5
+    frame_dt = 1.0 / max(fps, 1e-6)
+    ball_filter = ConstantAccelerationFilter()
     frame_idx = start_frame - 1
     started_at = time.monotonic()
     last_report_time = 0.0
@@ -909,8 +1033,11 @@ def detect_video_track(video_path, config, model, imgsz, conf):
                 last_report_time = now
             next_report_frame = frame_idx + report_every
 
-        # --- predict next position with velocity+acceleration ---
-        predicted, velocity_mag = _predict_ball_position(history)
+        # --- predict next position: Kalman first, sparse-history diff fallback ---
+        if ball_filter.initialized:
+            predicted, velocity_mag = ball_filter.predict_next(frame_dt)
+        else:
+            predicted, velocity_mag = _predict_ball_position(history)
         if predicted is not None:
             expected_center = predicted
         else:
@@ -950,6 +1077,7 @@ def detect_video_track(video_path, config, model, imgsz, conf):
             consecutive_miss = 0
             if len(history) > 8:
                 history = history[-8:]
+            ball_filter.update(chosen["center"], chosen.get("center_covariance"))
             ground_point = image_point_to_ground_world(chosen["foot"], config, ground_z=0.0)
             if ground_point is not None:
                 x_ok = FIELD_X_LIMITS[0] <= ground_point[0] <= FIELD_X_LIMITS[1]
@@ -960,6 +1088,7 @@ def detect_video_track(video_path, config, model, imgsz, conf):
             consecutive_miss += 1
             if consecutive_miss > MAX_MISS:
                 history.clear()
+                ball_filter.reset()
                 consecutive_miss = 0
 
         detections.append({
@@ -1151,28 +1280,37 @@ def select_cross_view_candidate_path(track_a, config_a, track_b, config_b, times
             )
         state_rows.append(states)
 
-    def first_transition(previous, current, dt):
-        speed = np.linalg.norm(current["world_point"] - previous["world_point"]) / dt
-        return 0.15 * _huber_cost(max(0.0, speed - 35.0) / 8.0)
+    def first_transition_batch(previous_states, current_states, dt):
+        previous = np.asarray([s["world_point"] for s in previous_states], dtype=np.float64)
+        current = np.asarray([s["world_point"] for s in current_states], dtype=np.float64)
+        speed = np.linalg.norm(current[None, :, :] - previous[:, None, :], axis=-1) / dt
+        return 0.15 * _huber_cost_array(np.maximum(0.0, speed - 35.0) / 8.0)
 
-    def second_transition(previous_previous, previous, current, dt_previous, dt_current):
+    def second_transition_batch(previous_previous_states, previous_states, current_states,
+                                dt_previous, dt_current):
+        previous_previous = np.asarray([s["world_point"] for s in previous_previous_states], dtype=np.float64)
+        previous = np.asarray([s["world_point"] for s in previous_states], dtype=np.float64)
+        current = np.asarray([s["world_point"] for s in current_states], dtype=np.float64)
         gravity = np.array([0.0, 0.0, -9.81], dtype=np.float64)
-        predicted = previous["world_point"] + (
-            previous["world_point"] - previous_previous["world_point"]
-        ) * (dt_current / dt_previous) + 0.5 * gravity * dt_current * (dt_previous + dt_current)
-        ballistic_residual = np.linalg.norm(current["world_point"] - predicted)
-        speed = np.linalg.norm(current["world_point"] - previous["world_point"]) / dt_current
+        predicted = (
+            previous[None, :, None, :]
+            + (previous[None, :, None, :] - previous_previous[:, None, None, :])
+            * (dt_current / dt_previous)
+            + 0.5 * gravity * dt_current * (dt_previous + dt_current)
+        )
+        ballistic_residual = np.linalg.norm(current[None, None, :, :] - predicted, axis=-1)
+        speed = np.linalg.norm(current[None, None, :, :] - previous[None, :, None, :], axis=-1) / dt_current
         return (
-            1.10 * _huber_cost(ballistic_residual / 0.25)
-            + 0.15 * _huber_cost(max(0.0, speed - 35.0) / 8.0)
+            1.10 * _huber_cost_array(ballistic_residual / 0.25)
+            + 0.15 * _huber_cost_array(np.maximum(0.0, speed - 35.0) / 8.0)
         )
 
     selected = second_order_viterbi(
         state_rows,
         times,
-        lambda state: state["emission"],
-        first_transition,
-        second_transition,
+        [np.asarray([state["emission"] for state in states], dtype=np.float64) for states in state_rows],
+        first_transition_batch,
+        second_transition_batch,
     )
     if selected is None:
         return None

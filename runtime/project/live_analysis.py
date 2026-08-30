@@ -32,6 +32,7 @@ from project.reconstruct_3d_trajectory import (
     VideoTrack,
     load_camera_configs,
     pick_detection,
+    ConstantAccelerationFilter,
     _predict_ball_position,
     _adaptive_ball_detect,
     project_world_points,
@@ -46,8 +47,47 @@ from project.reconstruct_3d_trajectory import (
 )
 
 
+def _frame_timestamp(cap, frame_index, fps):
+    """单路帧时间戳：优先容器/流内 POS_MSEC，否则帧号/帧率。
+
+    原实现用挂钟时间 time.time()-t0 给帧打戳，而检测发生在 read 之后：
+    CPU 跟不上时 read 返回的是缓冲区里的旧帧，挂钟把"检测耗时"记到了
+    帧上，时间轴出现与负载相关的抖动，直接污染起脚判定与实时预测。
+    容器时间戳（或帧号推算）与帧内容一一对应，总是单调、均匀的。
+    """
+    try:
+        msec = cap.get(cv2.CAP_PROP_POS_MSEC)
+    except cv2.error:
+        msec = 0.0
+    if msec and np.isfinite(msec) and msec > 0:
+        return float(msec) / 1000.0
+    return frame_index / max(float(fps), 1e-6)
+
+
+def _match_pair(pending_left, pending_right, max_gap):
+    """在两路待配对队列中找时间最接近的一对检测；超过 max_gap 视为无对应帧。
+
+    两路时间戳独立后，同一 while 轮次读到的左右帧不再保证对应同一物理
+    时刻，实时三角测量必须按时间就近配对而不是按读取轮次配对。
+    """
+    if not pending_left or not pending_right:
+        return None
+    best_gap = None
+    best = (0, 0)
+    for li, (t_l, _) in enumerate(pending_left):
+        for ri, (t_r, _) in enumerate(pending_right):
+            gap = abs(t_l - t_r)
+            if best_gap is None or gap < best_gap:
+                best_gap = gap
+                best = (li, ri)
+    if best_gap is None or best_gap > max_gap:
+        return None
+    li, ri = best
+    return pending_left.pop(li), pending_right.pop(ri)
+
+
 class _CamTracker:
-    """单路实时检测状态：位置预测历史 + 累积 2D 检测点"""
+    """单路实时检测状态：卡尔曼预测 + 累积 2D 检测点"""
 
     def __init__(self, config):
         self.config = config                      # CameraConfig 或 None
@@ -56,6 +96,8 @@ class _CamTracker:
         self.frame_w = 0
         self.frame_h = 0
         self.penalty_center = None                # 罚球点投影（需标定）
+        self.filter = ConstantAccelerationFilter()
+        self.filter_interval = 1.0 / 60.0
         self.times = []
         self.points = []                          # 2D 中心
         self.foots = []
@@ -70,8 +112,11 @@ class _CamTracker:
                 PENALTY_SPOT_GROUND_WORLD.reshape(1, 3), self.config)[0]
 
     def detect(self, model, frame, imgsz, conf):
-        """检测本帧足球；返回 chosen 或 None，并更新预测历史"""
-        predicted, vel = _predict_ball_position(self.history)
+        """检测本帧足球；返回 chosen 或 None，并更新卡尔曼状态"""
+        if self.filter.initialized:
+            predicted, vel = self.filter.predict_next(self.filter_interval)
+        else:
+            predicted, vel = _predict_ball_position(self.history)
         if predicted is None:
             predicted = self.penalty_center if self.penalty_center is not None \
                 else np.array([frame.shape[1] / 2.0, frame.shape[0] / 2.0])
@@ -90,11 +135,17 @@ class _CamTracker:
         if chosen is not None:
             self.history.append(chosen["center"].copy())
             self.miss = 0
+            self.filter.update(
+                chosen["center"],
+                chosen.get("center_covariance"),
+                self.filter_interval,
+            )
         else:
             self.miss += 1
             if self.miss > 5:
                 self.history.clear()
                 self.miss = 0
+                self.filter.reset()
         return chosen
 
     def record(self, t, chosen):
@@ -163,6 +214,29 @@ def _estimate_speed(world_buf):
         if dt > 1e-4:
             return float(np.linalg.norm(p2 - p1) / dt)
     return 0.0
+
+
+def _publish_frame(frame, preview_dir, side, preview_size=(1280, 720)):
+    """把一帧(已叠加检测框/轨迹)缩放后写成 JPEG，供 WPF 定时读取显示。
+
+    与 camera_capture 的预览发布一致：本地文件轮换 + 原子写，避免 WPF
+    读到半张图。分辨率按 preview_size 缩放；不捕获异常，失败即跳过，
+    不阻断录制/分析主循环。
+    """
+    if not preview_dir or frame is None or frame.size == 0:
+        return
+    try:
+        pd = Path(preview_dir)
+        pd.mkdir(parents=True, exist_ok=True)
+        w, h = int(preview_size[0]), int(preview_size[1])
+        if frame.shape[1] != w or frame.shape[0] != h:
+            frame = cv2.resize(frame, (w, h))
+        path = pd / f"live_preview_{side}.jpg"
+        tmp = path.with_suffix(".tmp.jpg")
+        if cv2.imwrite(str(tmp), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80]):
+            os.replace(str(tmp), str(path))
+    except Exception:
+        pass
 
 
 def finish_reconstruction(sample_name, sample_dir, tracker_l, tracker_r,
@@ -296,7 +370,7 @@ def finish_reconstruction(sample_name, sample_dir, tracker_l, tracker_r,
 
 
 def run(cam_left="0", cam_right="1", sample_name="sample_live",
-        imgsz=1280, conf=0.15, analyze_every=1, no_save=False):
+        imgsz=1280, conf=0.15, analyze_every=1, no_save=False, preview_dir=None):
     """边录制边分析核心入口（供 CLI 与独立版复用）"""
     sample_dir = Path("samples") / sample_name
     sample_dir.mkdir(parents=True, exist_ok=True)
@@ -340,6 +414,9 @@ def run(cam_left="0", cam_right="1", sample_name="sample_live",
     rec._fps[1] = fps_r
     tracker_l = _CamTracker(left_cfg)
     tracker_r = _CamTracker(right_cfg)
+    # 卡尔曼帧间隔 = 分析抽帧间隔（analyze_every 帧分析一次）
+    tracker_l.filter_interval = max(analyze_every, 1) / max(fps_l, 1e-6)
+    tracker_r.filter_interval = max(analyze_every, 1) / max(fps_r, 1e-6)
 
     # 写 mp4（保留录制文件）
     writers = [None, None]
@@ -358,6 +435,9 @@ def run(cam_left="0", cam_right="1", sample_name="sample_live",
 
     t0 = time.time()
     world_buf = deque(maxlen=400)
+    pending_left = []
+    pending_right = []
+    pair_max_gap = max(1.5 / min(fps_l, fps_r), 0.01)
     frame_idx = 0
     print("\n边录制边分析中... 按 Q 停止")
 
@@ -366,7 +446,10 @@ def run(cam_left="0", cam_right="1", sample_name="sample_live",
         ret_r, frame_r = cap_r.read()
         if not (ret_l and ret_r):
             break
-        t = time.time() - t0
+        # 各路独立帧时间戳（容器时间优先，帧号回退），替代挂钟时间
+        t_l = _frame_timestamp(cap_l, frame_idx, fps_l)
+        t_r = _frame_timestamp(cap_r, frame_idx, fps_r)
+        t = max(t_l, t_r)
 
         # 首次设置几何
         if tracker_l.frame_w == 0:
@@ -383,15 +466,28 @@ def run(cam_left="0", cam_right="1", sample_name="sample_live",
         if frame_idx % max(1, analyze_every) == 0:
             chosen_l = tracker_l.detect(model, frame_l, imgsz, conf)
             chosen_r = tracker_r.detect(model, frame_r, imgsz, conf)
-            tracker_l.record(t, chosen_l)
-            tracker_r.record(t, chosen_r)
+            tracker_l.record(t_l, chosen_l)
+            tracker_r.record(t_r, chosen_r)
 
-            # 实时 3D 点
-            if chosen_l is not None and chosen_r is not None and left_cfg is not None:
-                tri = triangulate_ball_point(chosen_l["center"], left_cfg,
-                                             chosen_r["center"], right_cfg)
+            # 实时 3D 点：按各自帧时间戳就近配对，而不是按读取轮次配对
+            if chosen_l is not None:
+                pending_left.append((t_l, chosen_l["center"]))
+            if chosen_r is not None:
+                pending_right.append((t_r, chosen_r))
+            if left_cfg is not None and len(pending_left) + len(pending_right) >= 4:
+                pair = _match_pair(pending_left, pending_right, pair_max_gap)
+                if pair is not None:
+                    tri = triangulate_ball_point(pair[0][1], left_cfg,
+                                                 pair[1][1], right_cfg)
+                    if tri is not None:
+                        world_buf.append((0.5 * (pair[0][0] + pair[1][0]), tri["world_point"]))
+        elif len(pending_left) + len(pending_right) >= 4:
+            pair = _match_pair(pending_left, pending_right, pair_max_gap)
+            if pair is not None and left_cfg is not None:
+                tri = triangulate_ball_point(pair[0][1], left_cfg,
+                                             pair[1][1], right_cfg)
                 if tri is not None:
-                    world_buf.append((t, tri["world_point"]))
+                    world_buf.append((0.5 * (pair[0][0] + pair[1][0]), tri["world_point"]))
 
         # 叠加绘制
         _draw_ball(frame_l, chosen_l)
@@ -399,6 +495,10 @@ def run(cam_left="0", cam_right="1", sample_name="sample_live",
         world_pts = np.asarray([p for _, p in world_buf], dtype=np.float64) if world_buf else None
         _draw_world_trace(frame_l, world_pts, left_cfg)
         _draw_world_trace(frame_r, world_pts, right_cfg)
+
+        # 把叠加了检测框/轨迹的左右两路画面发布给 WPF 预览(带检测框)
+        _publish_frame(frame_l, preview_dir, "left")
+        _publish_frame(frame_r, preview_dir, "right")
 
         # 合并预览
         f0 = cv2.resize(frame_l, (640, 360))
@@ -447,9 +547,11 @@ def main():
     parser.add_argument("--analyze-every", type=int, default=1,
                         help="每隔 N 帧分析一次（CPU 慢时调大，如 2/3）")
     parser.add_argument("--no-save", action="store_true", help="不落盘 mp4（仅实时分析）")
+    parser.add_argument("--preview-dir", default=None,
+                        help="把实时画面(叠加检测框)写到此目录供 WPF 显示")
     args = parser.parse_args()
     run(args.cam_left, args.cam_right, args.sample, args.imgsz, args.conf,
-        args.analyze_every, args.no_save)
+        args.analyze_every, args.no_save, preview_dir=args.preview_dir)
 
 
 if __name__ == "__main__":
