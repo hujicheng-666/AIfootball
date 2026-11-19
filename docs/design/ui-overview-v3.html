@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIfootball · 工作概览 — 设计稿 v3</title>
+<style>
+/* ===========================================================
+   Tokens —— 楷体排版：暖纸底、墨色字、细线分节、几乎无阴影
+   同一份 token 需同时生成 CSS 变量与 Themes/Tokens.xaml
+   =========================================================== */
+:root{
+  --paper:#FFFFFF;
+  --bg:#F4F2ED;
+  --bg-2:#EFEDE6;
+  --line:#E2DDD1;
+  --line-soft:#EDEAE1;
+  --line-strong:#D2CBBA;
+
+  --ink:#1B1A17;
+  --ink-2:#575446;
+  --ink-3:#8A8678;
+  --ink-4:#ADA89A;
+
+  --indigo:#243D6E;
+  --indigo-2:#39598F;
+  --indigo-wash:#EEF1F7;
+  --ochre:#96601A;
+  --ochre-wash:#F7F0E2;
+  --moss:#2F6B4F;
+  --moss-wash:#EDF3EE;
+  --rust:#9B3A34;
+  --rust-wash:#FAF0EE;
+
+  --kai:"KaiTi","楷体","STKaiti","Kaiti SC",serif;
+  --num:"Cambria","Georgia","Times New Roman",serif;
+
+  --w:1180px;
+  --nav:196px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:var(--kai);
+  font-size:13.5px;
+  line-height:1.75;
+  letter-spacing:.2px;
+  color:var(--ink);
+  background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+}
+.num{font-family:var(--num);font-variant-numeric:tabular-nums;letter-spacing:0}
+svg{display:block}
+:focus-visible{outline:1px solid var(--indigo-2);outline-offset:3px}
+
+.app{display:flex;flex-direction:column;min-height:100vh;min-width:1120px}
+
+/* ---------------- top ---------------- */
+.top{
+  height:48px;flex:0 0 auto;display:flex;align-items:center;
+  padding:0 28px;gap:14px;
+}
+.brand{display:flex;align-items:baseline;gap:9px}
+.brand-cn{font-size:15px;letter-spacing:1.8px}
+.brand-en{font-family:var(--num);font-size:10.5px;letter-spacing:2.4px;color:var(--ink-3);text-transform:uppercase}
+.top-right{margin-left:auto;display:flex;align-items:center;gap:18px;font-size:12.5px;color:var(--ink-3)}
+.top-link{cursor:pointer;transition:color .2s}
+.top-link:hover{color:var(--ink)}
+.avatar{width:26px;height:26px;border-radius:50%;border:1px solid var(--line-strong);display:grid;place-items:center;font-family:var(--num);font-size:11px;color:var(--ink-2);background:var(--paper)}
+
+/* ---------------- shell ---------------- */
+.shell{flex:1;display:flex;align-items:flex-start;gap:0;padding:0 28px 28px}
+
+/* ---------------- nav ---------------- */
+.nav{width:var(--nav);flex:0 0 auto;padding-top:8px}
+.nav-label{font-size:11.5px;letter-spacing:1.6px;color:var(--ink-4);padding:14px 12px 6px}
+.nav-item{
+  display:flex;align-items:center;gap:9px;height:34px;padding:0 12px;border-radius:3px;
+  color:var(--ink-2);cursor:pointer;transition:background .18s,color .18s;border:1px solid transparent;
+}
+.nav-item:hover{background:var(--bg-2);color:var(--ink)}
+.nav-item.on{background:var(--paper);border-color:var(--line);color:var(--ink)}
+.nav-item.on .dot-mark{background:var(--indigo)}
+.dot-mark{width:4px;height:4px;border-radius:50%;background:var(--ink-4);flex:0 0 auto}
+.nav-count{margin-left:auto;font-family:var(--num);font-size:11px;color:var(--ink-4)}
+
+/* ---------------- paper ---------------- */
+.paper{
+  flex:1;min-width:0;max-width:var(--w);margin:8px auto 0;
+  background:var(--paper);border:1px solid var(--line);
+  box-shadow:0 1px 2px rgba(27,26,23,.03);
+}
+
+/* ---------------- head ---------------- */
+.doc-head{padding:26px 40px 18px;display:flex;align-items:flex-start;gap:24px}
+.doc-kicker{font-size:11.5px;letter-spacing:2px;color:var(--ink-4);margin-bottom:7px}
+.doc-title{font-size:28px;letter-spacing:1.6px;line-height:1.3}
+.doc-sub{font-size:13px;color:var(--ink-3);margin-top:6px;letter-spacing:.3px}
+.doc-actions{margin-left:auto;display:flex;gap:8px;padding-top:6px}
+.btn{
+  height:32px;padding:0 15px;font-family:var(--kai);font-size:13px;letter-spacing:.6px;
+  border:1px solid var(--line-strong);background:var(--paper);color:var(--ink-2);
+  border-radius:2px;cursor:pointer;transition:all .18s;white-space:nowrap;
+}
+.btn:hover{background:var(--bg-2);color:var(--ink);border-color:var(--ink-4)}
+.btn.solid{background:var(--indigo);border-color:var(--indigo);color:#fff}
+.btn.solid:hover{background:#1B2F58;border-color:#1B2F58}
+
+/* ---------------- metrics ---------------- */
+.metrics{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  margin:0 40px;
+}
+.metric{padding:14px 0 13px;position:relative}
+.metric+.metric{padding-left:26px;border-left:1px solid var(--line-soft)}
+.metric-label{font-size:12.5px;color:var(--ink-3);letter-spacing:.8px}
+.metric-value{font-family:var(--num);font-size:20px;line-height:1.35;margin-top:4px;letter-spacing:-.2px}
+.metric-value em{font-family:var(--kai);font-style:normal;font-size:12.5px;color:var(--ink-3);letter-spacing:.3px;margin-left:3px}
+.metric-note{font-size:12px;color:var(--ink-4);margin-top:2px;letter-spacing:.3px}
+.metric-note b{font-weight:400;color:var(--moss)}
+.metric-note b.warn{color:var(--ochre)}
+
+/* ---------------- chain ---------------- */
+.chain{padding:22px 40px 20px;border-bottom:1px solid var(--line)}
+.sec-head{display:flex;align-items:baseline;gap:10px;margin-bottom:18px}
+.sec-title{font-size:15px;letter-spacing:1.4px}
+.sec-note{font-size:12.5px;color:var(--ink-3);letter-spacing:.3px}
+.sec-right{margin-left:auto;font-size:12.5px;color:var(--ink-3)}
+.sec-right b{font-family:var(--num);font-weight:400;color:var(--indigo)}
+.steps{display:flex;align-items:flex-start}
+.step{flex:1;min-width:0}
+.step-top{display:flex;align-items:center;gap:8px}
+.step-idx{
+  width:20px;height:20px;border-radius:50%;border:1px solid var(--line-strong);
+  display:grid;place-items:center;font-family:var(--num);font-size:11px;color:var(--ink-4);flex:0 0 auto;
+}
+.step.done .step-idx{border-color:#B8CFC0;color:var(--moss);background:var(--moss-wash)}
+.step.now .step-idx{border-color:var(--indigo);background:var(--indigo);color:#fff}
+.step-name{font-size:14px;letter-spacing:1.2px;color:var(--ink-3)}
+.step.done .step-name,.step.now .step-name{color:var(--ink)}
+.step-detail{font-size:12.5px;color:var(--ink-3);margin:7px 0 0 28px;line-height:1.7;letter-spacing:.2px}
+.step-detail .num{color:var(--ink-2)}
+.arrow{flex:0 0 34px;display:grid;place-items:center;padding-top:2px;color:var(--line-strong)}
+.arrow.pass{color:#B8CFC0}
+.track{height:2px;background:var(--line-soft);margin:9px 0 0 28px;max-width:104px;position:relative}
+.track i{position:absolute;left:0;top:0;height:2px;width:48%;background:var(--indigo-2)}
+.step-flag{font-size:12px;margin-top:4px;margin-left:28px;letter-spacing:.3px}
+.flag-done{color:var(--moss)}
+.flag-now{color:var(--indigo)}
+.flag-idle{color:var(--ink-4)}
+
+/* ---------------- body ---------------- */
+.doc-body{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr)}
+.col-l{padding:26px 40px 30px;border-right:1px solid var(--line);display:flex;flex-direction:column}
+.col-r{padding:26px 34px 30px}
+.col-l-foot{margin-top:22px;padding-top:0}
+
+/* ---------------- table ---------------- */
+.tbl-wrap{margin-top:4px}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{
+  text-align:left;font-size:12px;color:var(--ink-4);letter-spacing:1.2px;
+  padding:0 0 9px;border-bottom:1px solid var(--line);white-space:nowrap;
+}
+.tbl td{padding:11px 0;border-bottom:1px solid var(--line-soft);font-size:13.5px;color:var(--ink-2)}
+.tbl tbody tr{transition:background .15s}
+.tbl tbody tr:hover{background:#FCFBF8}
+.tbl tbody tr:last-child td{border-bottom:0}
+.cell-main{display:flex;align-items:baseline;gap:8px}
+.cell-main .name{letter-spacing:.6px;color:var(--ink)}
+.cell-main .tag{font-size:11.5px;color:var(--ink-4);letter-spacing:.3px}
+.judge{font-size:12.5px;letter-spacing:.3px}
+.judge.ok{color:var(--moss)}
+.judge.pending{color:var(--ochre)}
+.cell-time{font-family:var(--num);font-size:12.5px;color:var(--ink-4)}
+.row-link{color:var(--ink-4);text-align:right;cursor:pointer;transition:color .18s}
+.tbl tbody tr:hover .row-link{color:var(--indigo)}
+
+/* ---------------- gk ---------------- */
+.gk-list{margin-top:6px}
+.gk{padding:11px 0;border-bottom:1px solid var(--line-soft)}
+.gk:last-child{border-bottom:0}
+.gk-line{display:flex;align-items:baseline;gap:8px}
+.gk-name{font-size:13.5px;letter-spacing:.5px}
+.gk-rate{margin-left:auto;font-family:var(--num);font-size:13px}
+.gk-bar{height:2px;background:var(--line-soft);margin-top:7px;position:relative}
+.gk-bar i{position:absolute;left:0;top:0;height:2px;background:var(--indigo-2)}
+.gk-note{font-size:11.5px;color:var(--ink-4);margin-top:5px;letter-spacing:.2px}
+
+/* ---------------- matchup ---------------- */
+.mu{display:flex;gap:18px;align-items:center;margin-top:12px}
+.heat{display:grid;grid-template-columns:repeat(5,20px);grid-template-rows:repeat(3,13px);gap:2px;flex:0 0 auto}
+.heat div{border-radius:1px}
+.mu-info{flex:1;min-width:0}
+.mu-rate{font-family:var(--num);font-size:24px;line-height:1.1;letter-spacing:-.5px}
+.mu-rate span{font-family:var(--kai);font-size:12.5px;color:var(--ink-3);margin-left:2px}
+.mu-cap{font-size:12px;color:var(--ink-3);margin-top:3px;line-height:1.65;letter-spacing:.2px}
+.mu-meta{font-size:11.5px;color:var(--ink-4);margin-top:4px;letter-spacing:.3px}
+
+/* 数据摘要条：纯文本横排，与顶部指标带同构 */
+.strip{display:flex;border-top:1px solid var(--line-soft);margin-top:20px;padding-top:13px}
+.strip>div{flex:1;min-width:0}
+.strip>div+div{border-left:1px solid var(--line-soft);padding-left:14px}
+.strip .k{font-size:11.5px;color:var(--ink-4);letter-spacing:.8px}
+.strip .v{font-family:var(--num);font-size:16px;line-height:1.4;margin-top:1px}
+.strip .v em{font-family:var(--kai);font-style:normal;font-size:11.5px;color:var(--ink-4);margin-left:3px}
+
+.divider{height:1px;background:var(--line);margin:26px 0 0}
+
+/* ---------------- foot ---------------- */
+.doc-foot{
+  display:flex;align-items:center;gap:16px;
+  border-top:1px solid var(--line);padding:11px 40px;
+  font-size:11.5px;color:var(--ink-3);letter-spacing:.4px;
+}
+.doc-foot .r{margin-left:auto;display:flex;gap:16px;font-family:var(--num);font-size:11px;color:var(--ink-4)}
+.state{display:flex;align-items:center;gap:6px}
+.state i{width:5px;height:5px;border-radius:50%;background:var(--moss)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ top ============ -->
+  <div class="top">
+    <div class="brand">
+      <span class="brand-cn">点球三维轨迹训练台</span>
+      <span class="brand-en">AIfootball</span>
+    </div>
+    <div class="top-right">
+      <span class="top-link">搜索样本</span>
+      <span class="top-link">帮助</span>
+      <div class="avatar">HC</div>
+    </div>
+  </div>
+
+  <div class="shell">
+
+    <!-- ============ nav ============ -->
+    <nav class="nav">
+      <div class="nav-label">工作区</div>
+      <div class="nav-item on"><span class="dot-mark"></span>概览</div>
+      <div class="nav-item"><span class="dot-mark"></span>处理队列<span class="nav-count">2</span></div>
+      <div class="nav-item"><span class="dot-mark"></span>相机标定</div>
+      <div class="nav-item"><span class="dot-mark"></span>输出与交付<span class="nav-count">3</span></div>
+      <div class="nav-label">模型</div>
+      <div class="nav-item"><span class="dot-mark"></span>门将库<span class="nav-count">9</span></div>
+      <div class="nav-item"><span class="dot-mark"></span>数据集</div>
+    </nav>
+
+    <!-- ============ paper ============ -->
+    <main class="paper">
+
+      <!-- head -->
+      <header class="doc-head">
+        <div>
+          <div class="doc-kicker">工作概览</div>
+          <h1 class="doc-title">今日分析台</h1>
+          <p class="doc-sub">环境、数据与分析任务的当前状态 · 更新于 17:52</p>
+        </div>
+        <div class="doc-actions">
+          <button class="btn">新建样本</button>
+          <button class="btn solid">开始分析</button>
+        </div>
+      </header>
+
+      <!-- metrics -->
+      <section class="metrics">
+        <div class="metric">
+          <div class="metric-label">推理环境</div>
+          <div class="metric-value">Python 3.10<em>YOLO11m</em></div>
+          <div class="metric-note"><b>已就绪</b> · 137 项测试通过</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">图形设备</div>
+          <div class="metric-value">RTX 4060<em>8 GB</em></div>
+          <div class="metric-note">显存占用 22% · 空闲</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">相机标定</div>
+          <div class="metric-value">0.31<em>px 重投影误差</em></div>
+          <div class="metric-note"><b>双目标定可用</b> · 内参 12 组</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">样本</div>
+          <div class="metric-value">3<em>个 · 36 脚</em></div>
+          <div class="metric-note"><b class="warn">1 个待分析</b></div>
+        </div>
+      </section>
+
+      <!-- chain -->
+      <section class="chain">
+        <div class="sec-head">
+          <span class="sec-title">分析链路</span>
+          <span class="sec-note">sample3 正在拟合落点，交付尚未生成</span>
+          <span class="sec-right">进度 <b>2 / 4</b></span>
+        </div>
+        <div class="steps">
+          <div class="step done">
+            <div class="step-top"><span class="step-idx">1</span><span class="step-name">素材</span></div>
+            <div class="step-detail"><span class="num">3</span> 个样本 · 双路视频</div>
+            <div class="step-flag flag-done">已完成</div>
+          </div>
+          <div class="arrow pass">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 12h14M13 7l5 5-5 5"/></svg>
+          </div>
+          <div class="step done">
+            <div class="step-top"><span class="step-idx">2</span><span class="step-name">重建</span></div>
+            <div class="step-detail">三角化 <span class="num">412</span> 帧 · 轨迹 <span class="num">36</span> 条</div>
+            <div class="step-flag flag-done">已完成</div>
+          </div>
+          <div class="arrow pass">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 12h14M13 7l5 5-5 5"/></svg>
+          </div>
+          <div class="step now">
+            <div class="step-top"><span class="step-idx">3</span><span class="step-name">拟合</span></div>
+            <div class="step-detail">弹道拟合 · 残差 <span class="num">0.14</span> m</div>
+            <div class="track"><i></i></div>
+            <div class="step-flag flag-now">进行中 · 48%</div>
+          </div>
+          <div class="arrow">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 12h14M13 7l5 5-5 5"/></svg>
+          </div>
+          <div class="step">
+            <div class="step-top"><span class="step-idx">4</span><span class="step-name">交付</span></div>
+            <div class="step-detail">Unity 回放 / CSV 导出</div>
+            <div class="step-flag flag-idle">等待上游完成</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- body -->
+      <div class="doc-body">
+
+        <!-- left -->
+        <div class="col-l">
+          <div class="sec-head" style="margin-bottom:0">
+            <span class="sec-title">可用样本</span>
+            <span class="sec-note">每样本 left / right 双路录制</span>
+          </div>
+
+          <div class="tbl-wrap">
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th style="width:38%">样本</th>
+                  <th style="width:14%">录制</th>
+                  <th style="width:12%">射门</th>
+                  <th style="width:20%">落点判定</th>
+                  <th style="width:16%">更新时间</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="cell-main"><span class="name">sample1</span><span class="tag">已导出</span></span></td>
+                  <td>双路</td>
+                  <td class="num">12</td>
+                  <td><span class="judge ok">射正 67%</span></td>
+                  <td class="cell-time">今天 14:22</td>
+                  <td class="row-link">›</td>
+                </tr>
+                <tr>
+                  <td><span class="cell-main"><span class="name">sample2</span><span class="tag">已导出</span></span></td>
+                  <td>双路</td>
+                  <td class="num">9</td>
+                  <td><span class="judge ok">射正 55%</span></td>
+                  <td class="cell-time">昨天 19:08</td>
+                  <td class="row-link">›</td>
+                </tr>
+                <tr>
+                  <td><span class="cell-main"><span class="name">sample3</span><span class="tag">处理中</span></span></td>
+                  <td>双路</td>
+                  <td class="num">15</td>
+                  <td><span class="judge pending">待分析</span></td>
+                  <td class="cell-time">11-11 16:40</td>
+                  <td class="row-link">›</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="col-l-foot">
+            <div class="divider"></div>
+
+            <div class="sec-head" style="margin:24px 0 12px">
+              <span class="sec-title">处理入口</span>
+            </div>
+            <div style="display:flex;gap:10px">
+              <button class="btn" style="min-width:128px;letter-spacing:1.2px">离线样本处理</button>
+              <button class="btn" style="min-width:128px;letter-spacing:1.2px">在线采集</button>
+            </div>
+            <p style="font-size:12px;color:var(--ink-4);margin-top:10px;line-height:1.75;letter-spacing:.2px">
+              离线批处理整段合集视频；在线采集只预览画面，不落盘、不加载模型。
+            </p>
+
+            <div class="strip">
+              <div>
+                <div class="k">已分析</div>
+                <div class="v">21<em>脚</em></div>
+              </div>
+              <div>
+                <div class="k">射正率</div>
+                <div class="v">62<em>%</em></div>
+              </div>
+              <div>
+                <div class="k">平均残差</div>
+                <div class="v">0.14<em>m</em></div>
+              </div>
+              <div>
+                <div class="k">门将模型</div>
+                <div class="v">3<em>位可用</em></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- right -->
+        <div class="col-r">
+          <div class="sec-head" style="margin-bottom:2px">
+            <span class="sec-title">门将库</span>
+            <span class="sec-right">9 位</span>
+          </div>
+          <div class="gk-list">
+            <div class="gk">
+              <div class="gk-line"><span class="gk-name">Emi Martinez</span><span class="gk-rate">23.6%</span></div>
+              <div class="gk-bar"><i style="width:23.6%"></i></div>
+              <div class="gk-note">15 脚 · 五折 logloss 0.616 ✓</div>
+            </div>
+            <div class="gk">
+              <div class="gk-line"><span class="gk-name">Jordan Pickford</span><span class="gk-rate">21.8%</span></div>
+              <div class="gk-bar"><i style="width:21.8%"></i></div>
+              <div class="gk-note">17 脚 · 五折 logloss 0.590 ✓</div>
+            </div>
+            <div class="gk">
+              <div class="gk-line"><span class="gk-name">Hugo Lloris</span><span class="gk-rate">18.8%</span></div>
+              <div class="gk-bar"><i style="width:18.8%"></i></div>
+              <div class="gk-note">18 脚 · 置信度不足</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="sec-head" style="margin:24px 0 0">
+            <span class="sec-title">最近对位</span>
+          </div>
+          <div class="mu">
+            <div class="heat">
+              <div style="background:#F2F5FA"></div>
+              <div style="background:#E3EAF5"></div>
+              <div style="background:#F5F7FB"></div>
+              <div style="background:#D5DFEF"></div>
+              <div style="background:#F2F5FA"></div>
+              <div style="background:#C2D1E7"></div>
+              <div style="background:#A5BBDC"></div>
+              <div style="background:#B4C7E3"></div>
+              <div style="background:#8FA9CE"></div>
+              <div style="background:#CBD8EA"></div>
+              <div style="background:#DEE7F3"></div>
+              <div style="background:#5D80B4"></div>
+              <div style="background:#42679F"></div>
+              <div style="background:#7189B9"></div>
+              <div style="background:#E9EEF6"></div>
+            </div>
+            <div class="mu-info">
+              <div class="mu-rate">68<span>%</span></div>
+              <div class="mu-cap">sample1 × Emi Martinez<br>射手胜率（预测）</div>
+              <div class="mu-meta">右下角 · 置信度中等</div>
+            </div>
+          </div>
+          <p style="font-size:11.5px;color:var(--ink-4);margin-top:12px;line-height:1.7;letter-spacing:.2px">
+            热区为 15 格概率，颜色越深代表越可能被射向。
+          </p>
+        </div>
+      </div>
+
+      <!-- foot -->
+      <footer class="doc-foot">
+        <div class="state"><i></i>就绪</div>
+        <span>最近任务：sample3 拟合 48%</span>
+        <div class="r">
+          <span>RTX 4060</span>
+          <span>v2.0.0</span>
+          <span>UTF-8</span>
+        </div>
+      </footer>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

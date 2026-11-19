@@ -22,7 +22,12 @@ cuda = ["torch>=2.0"]
 cpu = ["torch>=2.0"]
 
 [project.scripts]
-aifootball = "aifootball.__main__:main"
+aifootball = "aifootball.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["aifootball*"]
+
+[tool.setuptools.package-data]
+# 外参标定的预设参考照片随包分发（estimate_extrinsics 的 PRESET_TASKS 使用）
+"aifootball.calibration" = ["assets/*.jpg"]

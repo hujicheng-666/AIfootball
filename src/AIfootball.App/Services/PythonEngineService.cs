@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO;
+using System.Text.Json;
 using AIfootball.App.Models;
 using AIfootball.App.Services.Interfaces;
 
@@ -7,14 +9,23 @@ namespace AIfootball.App.Services;
 /// <summary>Python 引擎服务 — 管理与嵌入式 Python 的通信</summary>
 public class PythonEngineService : IPythonEngine
 {
-    // Importing torch/ultralytics can take more than 10 seconds on a cold start.
-    // Keep this separate from normal task timeouts so a usable local environment
-    // is not reported as missing merely because its first import is slow.
-    private const int EnvironmentProbeTimeoutMs = 30000;
+    // selfcheck 要导入 torch/ultralytics 并探测 CUDA，冷启动可能超过 10 秒。
+    // 单独给它一个宽松的超时，避免把"慢"误判成"没装"。
+    private const int SelfCheckTimeoutMs = 60000;
+
+    private readonly object _selfCheckLock = new();
+    private EngineSelfCheck? _selfCheckResult;
+    private DateTime _selfCheckAt = DateTime.MinValue;
+    private static readonly TimeSpan SelfCheckTtl = TimeSpan.FromSeconds(60);
 
     private readonly string _baseDir;
     private readonly string _pythonEnvDir;
     private readonly string _pythonExe;
+
+    // 正在运行的 Python 子进程：应用退出时要把它们一起结束，
+    // 否则采集进程会变成孤儿继续占着 UDP 端口。
+    private readonly object _processLock = new();
+    private readonly HashSet<Process> _runningProcesses = new();
 
     public PythonEngineService(string baseDir)
     {
@@ -50,7 +61,8 @@ public class PythonEngineService : IPythonEngine
         string script, string arguments = "", int timeoutMs = 300000,
         CancellationToken cancellation = default,
         Action<string>? outputReceived = null,
-        Action<string>? errorReceived = null)
+        Action<string>? errorReceived = null,
+        Action<StreamWriter>? inputReady = null)
     {
         var psi = new ProcessStartInfo
         {
@@ -59,6 +71,9 @@ public class PythonEngineService : IPythonEngine
             WorkingDirectory = _baseDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            // 需要向子进程下发指令（预览 -> 开始分析 -> 停止）时才接管 stdin：
+            // 采集脚本用行协议读它，父进程自己不读，两边不会抢同一份输入。
+            RedirectStandardInput = inputReady != null,
             UseShellExecute = false,
             CreateNoWindow = true,
             StandardOutputEncoding = System.Text.Encoding.UTF8,
@@ -97,8 +112,18 @@ public class PythonEngineService : IPythonEngine
         };
 
         proc.Start();
+        if (inputReady != null)
+        {
+            // AutoFlush：命令按行下发，不能留在缓冲区里等进程结束
+            proc.StandardInput.AutoFlush = true;
+            inputReady(proc.StandardInput);
+        }
         proc.BeginOutputReadLine();
         proc.BeginErrorReadLine();
+        lock (_processLock)
+        {
+            _runningProcesses.Add(proc);
+        }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         cts.CancelAfter(timeoutMs);
@@ -113,69 +138,113 @@ public class PythonEngineService : IPythonEngine
                 proc.Kill(entireProcessTree: true);
             return (-1, string.Join(Environment.NewLine, outputLines), "操作超时或被取消");
         }
+        finally
+        {
+            lock (_processLock)
+            {
+                _runningProcesses.Remove(proc);
+            }
+        }
 
         return (proc.ExitCode, string.Join(Environment.NewLine, outputLines),
                 string.Join(Environment.NewLine, errorLines));
     }
 
-    public async Task<bool> IsEnvironmentReadyAsync()
+    public void TerminateAll()
     {
-        if (!File.Exists(_pythonExe)) return false;
-
-        var result = await Task.Run(async () =>
+        Process[] snapshot;
+        lock (_processLock)
         {
-            var psi = new ProcessStartInfo
-            {
-                FileName = _pythonExe,
-                Arguments = "-c \"import torch, ultralytics, cv2, scipy; print('OK')\"",
-                WorkingDirectory = _baseDir,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using var p = Process.Start(psi);
-            if (p == null) return (1, "");
-            // 先异步读取 stdout/stderr，再等待退出，避免输出缓冲填满导致死锁
-            var stdoutTask = p.StandardOutput.ReadToEndAsync();
-            var stderrTask = p.StandardError.ReadToEndAsync();
-            if (!p.WaitForExit(EnvironmentProbeTimeoutMs))
-            {
-                try { p.Kill(entireProcessTree: true); } catch { }
-                return (1, "");
-            }
-            await Task.WhenAll(stdoutTask, stderrTask);
-            return (p.ExitCode, stdoutTask.Result);
-        });
+            snapshot = _runningProcesses.ToArray();
+            _runningProcesses.Clear();
+        }
 
-        return result.Item1 == 0 && result.Item2.Contains("OK");
+        foreach (var process in snapshot)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[Python] 退出时结束子进程失败: {ex.Message}");
+            }
+        }
+    }
+
+    public async Task<bool> IsEnvironmentReadyAsync() =>
+        await RunSelfCheckAsync() is { HasCoreDependencies: true };
+
+    /// <summary>
+    /// 跑 `aifootball selfcheck`，界面与命令行看到的就是同一份结论。
+    /// 结果缓存一小段时间，启动流程里多处调用不会反复导入 torch。
+    /// </summary>
+    public async Task<EngineSelfCheck?> RunSelfCheckAsync(bool force = false)
+    {
+        if (!File.Exists(_pythonExe))
+            return null;
+
+        lock (_selfCheckLock)
+        {
+            if (!force && _selfCheckResult is not null
+                && DateTime.UtcNow - _selfCheckAt < SelfCheckTtl)
+                return _selfCheckResult;
+        }
+
+        var (code, output, error) = await RunAsync(
+            EngineEntryPath,
+            $"selfcheck --workspace \"{_baseDir}\"",
+            SelfCheckTimeoutMs);
+
+        if (code != 0)
+        {
+            Debug.WriteLine($"[SelfCheck] 退出码 {code}: {error}");
+            return null;
+        }
+
+        // stdout 里只认最后一行 JSON：库自身的初始化噪音都走 stderr
+        var line = output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(text => text.Trim())
+            .LastOrDefault(text => text.StartsWith('{') && text.EndsWith('}'));
+        if (line is null)
+        {
+            Debug.WriteLine("[SelfCheck] 输出里没有 JSON 行");
+            return null;
+        }
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<EngineSelfCheck>(line);
+            lock (_selfCheckLock)
+            {
+                _selfCheckResult = result;
+                _selfCheckAt = DateTime.UtcNow;
+            }
+            return result;
+        }
+        catch (JsonException ex)
+        {
+            Debug.WriteLine($"[SelfCheck] 解析失败: {ex.Message}");
+            return null;
+        }
     }
 
     public async Task<EnvironmentStatus> GetEnvironmentStatusAsync()
     {
-        if (!File.Exists(_pythonExe))
+        var check = await RunSelfCheckAsync();
+        if (check is null)
             return EnvironmentStatus.Unknown;
 
-        try
-        {
-            // 注意：RunAsync 会自行拼接 "-u \"-c\"" 前缀，这里只传代码本体并用引号包裹，
-            // 避免出现两个 "-c" 导致 Python 把代码当作脚本文件名而报 SyntaxError。
-            var codeText = "import sys; print(sys.version.split()[0]); import torch; print(torch.__version__); print('cuda-cu124' if torch.cuda.is_available() else 'cpu')";
-            var (code, output, _) = await RunAsync("-c", $"\"{codeText}\"", 15000);
-            if (code != 0) return EnvironmentStatus.Unknown;
-
-            var lines = output.Trim().Split('\n', StringSplitOptions.RemoveEmptyEntries);
-            var pyVer = lines.Length > 0 ? lines[0].Trim() : "";
-            var torchVer = lines.Length > 1 ? lines[1].Trim() : "";
-            var profile = lines.Length > 2 ? lines[2].Trim() : "cpu";
-
-            var gpu = await new GpuDetectionService().DetectAsync();
-            return new EnvironmentStatus(true, pyVer, torchVer, profile,
-                gpu.CudaAvailable, gpu.GpuName, gpu.AdapterNames);
-        }
-        catch
-        {
-            return EnvironmentStatus.Unknown;
-        }
+        var gpu = await new GpuDetectionService().DetectAsync();
+        return new EnvironmentStatus(
+            check.HasCoreDependencies,
+            check.Python ?? "",
+            check.Torch ?? "",
+            check.Cuda ? "cuda" : "cpu",
+            gpu.CudaAvailable,
+            gpu.GpuName,
+            gpu.AdapterNames);
     }
 }

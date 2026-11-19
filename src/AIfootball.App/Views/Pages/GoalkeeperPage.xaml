@@ -1,0 +1,839 @@
+<UserControl x:Class="AIfootball.App.Views.Pages.GoalkeeperPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:AIfootball.App.Controls"
+             Background="{StaticResource BackgroundBrush}"
+             Focusable="True" PreviewKeyDown="TrainerRoot_PreviewKeyDown">
+
+    <!--
+        独立标注工作台，版式按「标注员的视线顺序」排：
+          头部      当前门将 + 标注/训练 模式
+          左栏      素材（门将库 / 片段表）——选完就不再看
+          中间      画面 + 时间轴 + 走带（90% 的操作发生在这里）
+          右栏      三步标注台（门框 → 落点 → 保存）
+          底部      状态行 + 训练/发布
+        时间轴与走带横贯整页，而不是挤在画面下方的小格子里：
+        逐帧比对是重复动作，控件必须够大、够近、有固定位置。
+    -->
+    <UserControl.Resources>
+        <!-- 分区标题：用字重和字号分块，不靠大标题和分割线堆装饰 -->
+        <Style x:Key="RailLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
+
+        <!-- 键帽：把快捷键当实体按键展示，比一行说明文字好扫 -->
+        <Style x:Key="Kbd" TargetType="Border">
+            <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="3"/>
+            <Setter Property="Padding" Value="5,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="KbdText" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas, Segoe UI"/>
+            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        </Style>
+
+        <!-- 走带按钮：无边框、悬停才浮起，避免一排蓝框把播放键的权重吃掉 -->
+        <Style x:Key="TransportButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Padding" Value="9,4"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="5"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 逐帧按钮：加边框抬高权重——这是标注时点得最多的两个键 -->
+        <Style x:Key="FrameStepButton" TargetType="Button" BasedOn="{StaticResource TransportButton}">
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+            <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="5" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
+                                <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 模式页签：底部指示条，不抢头部留白 -->
+        <Style x:Key="WorkTab" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Grid Background="Transparent">
+                            <ContentPresenter Margin="15,0" VerticalAlignment="Center"
+                                              HorizontalAlignment="Center"/>
+                            <Border x:Name="Indicator" Height="2" VerticalAlignment="Bottom"
+                                    Background="Transparent" Margin="11,0"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Indicator" Property="Background"
+                                        Value="{StaticResource PrimaryBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 二选一结果：药丸形，选中色块即可读 -->
+        <Style x:Key="OutcomeRadio" TargetType="RadioButton">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Pill" Background="{StaticResource SurfaceBrush}"
+                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                CornerRadius="5" Padding="12,4">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Pill" Property="BorderBrush" Value="#C3D0E4"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Pill" Property="Background"
+                                        Value="{StaticResource PrimaryLightBrush}"/>
+                                <Setter TargetName="Pill" Property="BorderBrush"
+                                        Value="{StaticResource PrimaryBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 细滚动条：右栏在矮窗口里会滚动，默认滚动条 17px 宽，会把右侧内容挤掉 -->
+        <Style x:Key="SlimScrollBar" TargetType="ScrollBar">
+            <Setter Property="Width" Value="8"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollBar">
+                        <Grid Background="Transparent" Width="8">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageUpCommand" Opacity="0"
+                                                  Focusable="False"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="4">
+                                        <Thumb.Template>
+                                            <ControlTemplate TargetType="Thumb">
+                                                <Border Background="#C7D2E0" CornerRadius="2"/>
+                                            </ControlTemplate>
+                                        </Thumb.Template>
+                                    </Thumb>
+                                </Track.Thumb>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="ScrollBar.PageDownCommand" Opacity="0"
+                                                  Focusable="False"/>
+                                </Track.IncreaseRepeatButton>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- 左栏列表项：紧凑行高，密度优先 -->
+        <Style x:Key="RailListItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="7,5"/>
+            <Setter Property="Margin" Value="0,1"/>
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="5"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" Value="{StaticResource PrimaryLightBrush}"/>
+                                <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsSelected" Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="50"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="52"/>
+        </Grid.RowDefinitions>
+
+        <!-- ================= 头部：身份 + 模式 ================= -->
+        <Border Grid.Row="0" Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,0,1" Padding="16,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="门将模型训练" FontSize="15" FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"/>
+                    <Border Width="1" Height="13" Background="{StaticResource BorderBrush}" Margin="10,0"/>
+                    <TextBlock x:Name="TrainerHeaderText" Text="未选择门将" FontSize="11.5"
+                               Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center"
+                               MaxWidth="200" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                    <RadioButton x:Name="TrainerAnnotateTab" Content="标注" GroupName="KeeperTab"
+                                 Style="{StaticResource WorkTab}" IsChecked="True" Checked="KeeperTab_Checked"/>
+                    <RadioButton x:Name="TrainerTrainTab" Content="训练" GroupName="KeeperTab"
+                                 Style="{StaticResource WorkTab}" Checked="KeeperTab_Checked"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- ================= 工作区 ================= -->
+        <Grid Grid.Row="1">
+            <!-- 标注：素材 / 画面 / 标注台 -->
+            <Grid x:Name="TrainerAnnotatePanel">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="196"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="252"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 左栏：素材 -->
+                <Border Grid.Column="0" Background="{StaticResource SurfaceBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0"
+                        Padding="12,10,12,8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Text="门将模型" Style="{StaticResource RailLabel}"/>
+                        <Grid Grid.Row="1">
+                            <ListBox x:Name="TrainerKeeperList" Background="Transparent"
+                                     BorderThickness="0" MaxHeight="124" FontSize="12"
+                                     DisplayMemberPath="Label"
+                                     ItemContainerStyle="{StaticResource RailListItem}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     SelectionChanged="TrainerKeeper_SelectionChanged"/>
+                            <!-- 空库时给出可执行的下一步，而不是留一个看不见内容的空列表 -->
+                            <TextBlock x:Name="KeeperEmptyHint" Text="暂无模型：输入名称后点「新建」"
+                                       FontSize="11" TextWrapping="Wrap" Margin="2,2,0,0"
+                                       Foreground="{StaticResource TextMutedBrush}"/>
+                        </Grid>
+
+                        <!-- 新建：输入框与按钮同一行，避免"填了名字找不到确认" -->
+                        <Grid Grid.Row="2" Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="NewKeeperNameBox" Style="{StaticResource ModernTextBox}"
+                                     Height="26" FontSize="11.5" Padding="7,4"
+                                     ToolTip="新门将模型名称（会创建对应的标注目录）"/>
+                            <Button Grid.Column="1" Content="新建" Margin="5,0,0,0" Height="26"
+                                    Style="{StaticResource SecondaryButton}" Padding="9,0" FontSize="11"
+                                    Click="CreateKeeper_Click" ToolTip="按上方名称新建门将模型"/>
+                        </Grid>
+
+                        <TextBlock Grid.Row="3" Text="比赛片段" Style="{StaticResource RailLabel}"
+                                   Margin="0,14,0,6"/>
+                        <UniformGrid Grid.Row="4" Columns="3">
+                            <Button Content="载入…" Style="{StaticResource SecondaryButton}"
+                                    Padding="0,3" FontSize="11" Click="OpenClips_Click"
+                                    ToolTip="选择存放比赛片段的文件夹"/>
+                            <Button Content="示例" Style="{StaticResource SecondaryButton}"
+                                    Padding="0,3" FontSize="11" Margin="4,0,0,0"
+                                    Click="OpenSampleClips_Click" ToolTip="直接载入 data/external/videos"/>
+                            <Button Content="JSON" Style="{StaticResource SecondaryButton}"
+                                    Padding="0,3" FontSize="11" Margin="4,0,0,0"
+                                    Click="ImportEvents_Click" ToolTip="导入 StatsBomb 事件 JSON"/>
+                        </UniformGrid>
+
+                        <Grid Grid.Row="5" Margin="0,6,0,0">
+                            <ListBox x:Name="TrainerClipList" Background="Transparent"
+                                     BorderThickness="0" FontSize="11.5"
+                                     ItemContainerStyle="{StaticResource RailListItem}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     SelectionChanged="TrainerClip_SelectionChanged"/>
+                            <TextBlock x:Name="ClipEmptyHint" Text="未载入片段：点「载入…」选文件夹"
+                                       FontSize="11" TextWrapping="Wrap" Margin="2,2,0,0"
+                                       Foreground="{StaticResource TextMutedBrush}"/>
+                        </Grid>
+                    </Grid>
+                </Border>
+
+                <!-- 中间：画面 -->
+                <Grid Grid.Column="1" Margin="12,12,12,0">
+                    <Border Background="#0B0F14" CornerRadius="8" ClipToBounds="True"
+                            BorderBrush="#1B2530" BorderThickness="1">
+                        <Grid>
+                            <MediaElement x:Name="TrainerVideo" Stretch="Uniform"
+                                          LoadedBehavior="Manual" UnloadedBehavior="Manual"
+                                          ScrubbingEnabled="True"
+                                          MediaOpened="TrainerVideo_MediaOpened"
+                                          MediaEnded="TrainerVideo_MediaEnded"
+                                          MediaFailed="TrainerVideo_MediaFailed"/>
+                            <Canvas x:Name="TrainerOverlay" Background="Transparent"
+                                    MouseLeftButtonDown="TrainerOverlay_MouseDown"/>
+
+                            <!-- 空状态：没有片段时明确告诉用户下一步，而不是留一块黑 -->
+                            <StackPanel x:Name="ViewerHintText" HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" IsHitTestVisible="False">
+                                <TextBlock Text="尚未载入片段" Foreground="#94A3B8" FontSize="13"
+                                           HorizontalAlignment="Center"/>
+                                <TextBlock Text="左侧「载入…」选择文件夹，或点「示例」使用内置素材"
+                                           Foreground="#5B6B7F" FontSize="11" Margin="0,6,0,0"
+                                           HorizontalAlignment="Center"/>
+                            </StackPanel>
+
+                            <!-- 画面角标：片段与分辨率、这一脚的门框状态 -->
+                            <Border Background="#B20B0F14" CornerRadius="4" Padding="7,3"
+                                    HorizontalAlignment="Left" VerticalAlignment="Top" Margin="8"
+                                    IsHitTestVisible="False">
+                                <TextBlock x:Name="ViewerClipText" Text="—" FontSize="10.5"
+                                           Foreground="#D5DEE8" TextTrimming="CharacterEllipsis"
+                                           MaxWidth="320"/>
+                            </Border>
+                            <Border Background="#B20B0F14" CornerRadius="4" Padding="7,3"
+                                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8"
+                                    IsHitTestVisible="False">
+                                <TextBlock x:Name="TrainerGoalFlagText" Text="门框未标定" FontSize="10.5"
+                                           Foreground="#D5DEE8"/>
+                            </Border>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- 右栏：三步标注台（门框 → 落点 → 保存）。
+                     上半段随内容走、空间不够时滚动；快捷键条钉在底部，
+                     窗口变高时多出来的空白落在两者之间，而不是把整列内容顶到半空。 -->
+                <Border Grid.Column="2" Background="{StaticResource SurfaceBrush}"
+                        BorderBrush="{StaticResource BorderBrush}" BorderThickness="1,0,0,0"
+                        Padding="12,8,10,8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <ScrollViewer.Resources>
+                                <Style TargetType="ScrollBar" BasedOn="{StaticResource SlimScrollBar}"/>
+                            </ScrollViewer.Resources>
+                            <StackPanel>
+                                <!-- ① 门框标定：四点进度可视化，当前该点哪一角由状态行给出 -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="① 门框标定" Style="{StaticResource RailLabel}"/>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                                VerticalAlignment="Top">
+                                        <Border x:Name="CalibDot1" Width="9" Height="9" CornerRadius="5"
+                                                Margin="0,0,4,0" BorderThickness="1"
+                                                BorderBrush="{StaticResource BorderBrush}"/>
+                                        <Border x:Name="CalibDot2" Width="9" Height="9" CornerRadius="5"
+                                                Margin="0,0,4,0" BorderThickness="1"
+                                                BorderBrush="{StaticResource BorderBrush}"/>
+                                        <Border x:Name="CalibDot3" Width="9" Height="9" CornerRadius="5"
+                                                Margin="0,0,4,0" BorderThickness="1"
+                                                BorderBrush="{StaticResource BorderBrush}"/>
+                                        <Border x:Name="CalibDot4" Width="9" Height="9" CornerRadius="5"
+                                                BorderThickness="1" BorderBrush="{StaticResource BorderBrush}"/>
+                                    </StackPanel>
+                                </Grid>
+                                <TextBlock x:Name="TrainerCalibrationText" FontSize="11" TextWrapping="Wrap"
+                                           LineHeight="16" Margin="0,4,0,0"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           Text="未标定门框：依次点左上、右上、右下、左下，每脚单独标定。"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                    <Button Content="标定四角" Style="{StaticResource SecondaryButton}"
+                                            Padding="9,2" FontSize="11" Click="StartCalibration_Click"
+                                            ToolTip="依次标注左上、右上、右下、左下四个门角；每脚单独标定"/>
+                                    <Button Content="清除" Style="{StaticResource SecondaryButton}"
+                                            Padding="9,2" FontSize="11" Margin="5,0,0,0"
+                                            Click="ClearShotCalibration_Click"
+                                            ToolTip="移除本脚已保存的门框标定"/>
+                                </StackPanel>
+
+                                <Border Height="1" Background="{StaticResource BorderBrush}"
+                                        Margin="0,10,0,0"/>
+
+                                <!-- ② 落点与判定 -->
+                                <TextBlock Text="② 落点标注" Style="{StaticResource RailLabel}"
+                                           Margin="0,8,0,5"/>
+                                <TextBlock x:Name="TrainerPointText" FontSize="11" TextWrapping="Wrap"
+                                           LineHeight="16" Foreground="{StaticResource TextSecondaryBrush}"
+                                           Text="拖到球过线帧，点一下球心。"/>
+
+                                <TextBlock Text="本脚结果" Style="{StaticResource RailLabel}"
+                                           Margin="0,8,0,4"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <RadioButton x:Name="TrainerGoalRadio" Content="进球"
+                                                 GroupName="TrainerOutcome" IsChecked="True"
+                                                 Style="{StaticResource OutcomeRadio}"/>
+                                    <RadioButton x:Name="TrainerSavedRadio" Grid.Column="1" Content="扑出"
+                                                 GroupName="TrainerOutcome" Margin="5,0,0,0"
+                                                 Style="{StaticResource OutcomeRadio}"/>
+                                    <CheckBox x:Name="TrainerMirrorBox" Grid.Column="2" Content="镜像"
+                                              FontSize="11" HorizontalAlignment="Right"
+                                              VerticalAlignment="Center"
+                                              Foreground="{StaticResource TextSecondaryBrush}"
+                                              IsChecked="False"
+                                              ToolTip="画面水平镜像：机位与门将视角相反时开启"/>
+                                </Grid>
+
+                                <Border Height="1" Background="{StaticResource BorderBrush}"
+                                        Margin="0,10,0,0"/>
+
+                                <!-- ③ 保存：一步到下一脚，是这页唯一的高权重动作 -->
+                                <TextBlock Text="③ 保存并进入下一脚" Style="{StaticResource RailLabel}"
+                                           Margin="0,8,0,5"/>
+                                <Button Content="保存标注（Enter）" Style="{StaticResource PrimaryButton}"
+                                        Padding="10,6" FontSize="11.5" HorizontalAlignment="Stretch"
+                                        Click="SaveAnnotation_Click"
+                                        ToolTip="保存本脚并自动跳到下一脚（Enter 同效）"/>
+                                <Grid Margin="0,5,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Button Content="清除标记" Style="{StaticResource SecondaryButton}"
+                                            Padding="6,3" FontSize="11" Click="ClearBallMark_Click"
+                                            ToolTip="仅清除尚未保存的球心标记"/>
+                                    <Button Grid.Column="1" Content="撤销本脚" Margin="5,0,0,0"
+                                            Style="{StaticResource SecondaryButton}" Padding="6,3"
+                                            FontSize="11" Click="UndoLastAnnotation_Click"
+                                            ToolTip="删除本脚已保存的标注；若只有门框标定则撤销门框"/>
+                                </Grid>
+
+                                <Border Height="1" Background="{StaticResource BorderBrush}"
+                                        Margin="0,9,0,0"/>
+
+                                <!-- 本片段：素材是什么、切成几脚、已标几脚。
+                                     这几个数是标注时最常核对的，钉在手边比翻状态行省事。 -->
+                                <TextBlock Text="本片段" Style="{StaticResource RailLabel}"
+                                           Margin="0,8,0,4"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="16"/>
+                                        <RowDefinition Height="16"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="分辨率" FontSize="10.5" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextMutedBrush}"/>
+                                    <TextBlock x:Name="ClipResolutionText" Grid.Column="1" Text="—"
+                                               FontFamily="Consolas, Segoe UI" FontSize="10.5"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    <TextBlock Grid.Column="2" Text="时长" FontSize="10.5" Margin="10,0,0,0"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextMutedBrush}"/>
+                                    <TextBlock x:Name="ClipDurationText" Grid.Column="3" Text="—"
+                                               FontFamily="Consolas, Segoe UI" FontSize="10.5"
+                                               Margin="5,0,0,0" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    <TextBlock Grid.Row="1" Text="候选" FontSize="10.5"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextMutedBrush}"/>
+                                    <TextBlock x:Name="ClipShotsText" Grid.Row="1" Grid.Column="1" Text="—"
+                                               FontFamily="Consolas, Segoe UI" FontSize="10.5"
+                                               VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="2" Text="已标" FontSize="10.5"
+                                               Margin="10,0,0,0" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextMutedBrush}"/>
+                                    <TextBlock x:Name="ClipMarkedText" Grid.Row="1" Grid.Column="3" Text="—"
+                                               FontFamily="Consolas, Segoe UI" FontSize="10.5"
+                                               Margin="5,0,0,0" VerticalAlignment="Center"
+                                               Foreground="{StaticResource TextSecondaryBrush}"/>
+                                </Grid>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <!-- 快捷键：结构化键帽，替代原来一整段说明文字 -->
+                        <StackPanel Grid.Row="1" Margin="0,8,0,0">
+                            <Border Height="1" Background="{StaticResource BorderBrush}" Margin="0,0,0,8"/>
+                            <TextBlock Text="快捷键" Style="{StaticResource RailLabel}" Margin="0,0,0,4"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="18"/>
+                                    <RowDefinition Height="18"/>
+                                    <RowDefinition Height="18"/>
+                                </Grid.RowDefinitions>
+
+                                <Border Grid.Row="0" Style="{StaticResource Kbd}">
+                                    <TextBlock Text="← →" Style="{StaticResource KbdText}"/>
+                                </Border>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Text="逐帧" FontSize="10.5"
+                                           Margin="5,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}"/>
+                                <Border Grid.Row="0" Grid.Column="3" Style="{StaticResource Kbd}">
+                                    <TextBlock Text="空格" Style="{StaticResource KbdText}"/>
+                                </Border>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="播放 / 暂停" FontSize="10.5"
+                                           HorizontalAlignment="Right" Margin="0,0,5,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}"/>
+
+                                <Border Grid.Row="1" Style="{StaticResource Kbd}">
+                                    <TextBlock Text="↑ ↓" Style="{StaticResource KbdText}"/>
+                                </Border>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Text="逐秒" FontSize="10.5"
+                                           Margin="5,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}"/>
+                                <Border Grid.Row="1" Grid.Column="3" Style="{StaticResource Kbd}">
+                                    <TextBlock Text="Enter" Style="{StaticResource KbdText}"/>
+                                </Border>
+                                <TextBlock Grid.Row="1" Grid.Column="2" Text="保存并下一脚" FontSize="10.5"
+                                           HorizontalAlignment="Right" Margin="0,0,5,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}"/>
+
+                                <Border Grid.Row="2" Style="{StaticResource Kbd}">
+                                    <TextBlock Text="Shift 方向" Style="{StaticResource KbdText}"/>
+                                </Border>
+                                <TextBlock Grid.Row="2" Grid.Column="1" Text="1 秒" FontSize="10.5"
+                                           Margin="5,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}"/>
+                                <Border Grid.Row="2" Grid.Column="3" Style="{StaticResource Kbd}">
+                                    <TextBlock Text="Esc" Style="{StaticResource KbdText}"/>
+                                </Border>
+                                <TextBlock Grid.Row="2" Grid.Column="2" Text="退回未保存" FontSize="10.5"
+                                           HorizontalAlignment="Right" Margin="0,0,5,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="{StaticResource TextMutedBrush}"/>
+                            </Grid>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- 训练：区域概率 + 训练结果 -->
+            <Grid x:Name="TrainerTrainPanel" Visibility="Collapsed" Margin="16">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="1.05*"/>
+                    <ColumnDefinition Width="14"/>
+                    <ColumnDefinition Width="0.95*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 左：热力图放在一块浅色画布上（不是裸白底），
+                     空白区域读起来是"图的留白"而不是"卡片没写完" -->
+                <Border Style="{StaticResource Card}" Padding="16">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="区域扑救概率" FontSize="13" FontWeight="SemiBold"/>
+                        <TextBlock Grid.Row="1" Text="冷色＝强扑救区　暖色＝弱扑救区；15 区按本图极值归一化"
+                                   FontSize="10.5" Margin="0,3,0,10"
+                                   Foreground="{StaticResource TextMutedBrush}"/>
+                        <Border Grid.Row="2" Background="{StaticResource SurfaceAltBrush}"
+                                BorderBrush="{StaticResource BorderBrush}" BorderThickness="1"
+                                CornerRadius="6" Padding="10" MinHeight="200">
+                            <controls:GoalZoneHeatmapControl x:Name="TrainerHeatmap"
+                                                             MinHeight="180" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Grid.Row="3" Margin="0,12,0,0">
+                            <Border Height="1" Background="{StaticResource BorderBrush}"/>
+                            <TextBlock Text="区域样本（扑救率 / 样本数）" Style="{StaticResource RailLabel}"
+                                       Margin="0,10,0,0"/>
+                            <TextBlock x:Name="TrainerZoneSamplesText" FontFamily="Consolas, Segoe UI"
+                                       FontSize="10.5" LineHeight="17" Margin="0,5,0,0"
+                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <!-- 右：四个关键数先给结论，历史与警告在下面 -->
+                <Border Grid.Column="2" Style="{StaticResource Card}" Padding="16">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="训练结果" FontSize="13" FontWeight="SemiBold"/>
+
+                        <Grid Grid.Row="1" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock x:Name="TileShotsText" Text="—" FontFamily="Consolas, Segoe UI"
+                                       FontSize="19" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                            <TextBlock x:Name="TileSavesText" Grid.Column="1" Text="—"
+                                       FontFamily="Consolas, Segoe UI" FontSize="19" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                            <TextBlock x:Name="TileRateText" Grid.Column="2" Text="—"
+                                       FontFamily="Consolas, Segoe UI" FontSize="19" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                            <TextBlock x:Name="TileConfidenceText" Grid.Column="3" Text="—"
+                                       FontFamily="Consolas, Segoe UI" FontSize="19" FontWeight="SemiBold"
+                                       Foreground="{StaticResource TextPrimaryBrush}"/>
+                            <TextBlock Grid.Row="1" Text="射正" FontSize="10"
+                                       Foreground="{StaticResource TextMutedBrush}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="扑出" FontSize="10"
+                                       Foreground="{StaticResource TextMutedBrush}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="2" Text="扑救率" FontSize="10"
+                                       Foreground="{StaticResource TextMutedBrush}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="3" Text="置信度" FontSize="10"
+                                       Foreground="{StaticResource TextMutedBrush}"/>
+                        </Grid>
+
+                        <TextBlock x:Name="TrainerSummaryText" Grid.Row="2" FontSize="11"
+                                   TextWrapping="Wrap" LineHeight="18" Margin="0,10,0,0"
+                                   Foreground="{StaticResource TextSecondaryBrush}"/>
+
+                        <StackPanel Grid.Row="3" Margin="0,12,0,0">
+                            <Border Height="1" Background="{StaticResource BorderBrush}"/>
+                            <TextBlock Text="训练历史" Style="{StaticResource RailLabel}" Margin="0,10,0,0"/>
+                        </StackPanel>
+
+                        <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0">
+                            <TextBlock x:Name="TrainerHistoryText" FontFamily="Consolas, Segoe UI"
+                                       FontSize="10.5" LineHeight="17" TextWrapping="Wrap"
+                                       Foreground="{StaticResource TextSecondaryBrush}"/>
+                        </ScrollViewer>
+
+                        <TextBlock x:Name="TrainerWarningsText" Grid.Row="5" FontSize="11" Margin="0,10,0,0"
+                                   TextWrapping="Wrap" LineHeight="17"
+                                   Foreground="{StaticResource WarningBrush}"/>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!-- ================= 时间轴 + 走带（横贯整页） ================= -->
+        <Border x:Name="TrainerTransportBar" Grid.Row="2" Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0"
+                Padding="16,8,16,8">
+            <StackPanel>
+                <!-- 时间轴：缩略图带 + 刻度尺 + 可拖播放头。
+                     宽于视口时横向滚动（缩放后自动跟随播放头），滚轮缩放、Shift+滚轮平移。 -->
+                <ScrollViewer x:Name="TimelineScroll" Height="60" Focusable="False"
+                              HorizontalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Disabled"
+                              PanningMode="None"
+                              SizeChanged="TimelineScroll_SizeChanged">
+                    <controls:TimelineStrip x:Name="Timeline" Height="60" HorizontalAlignment="Left"
+                                            ToolTip="拖动定位；滚轮缩放，Shift+滚轮平移"/>
+                </ScrollViewer>
+
+                <!-- 读数与缩放：帧号/时间码是剪辑时最常核对的两个数 -->
+                <Grid Margin="0,3,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock x:Name="TrainerFrameText" FontFamily="Consolas, Segoe UI" FontSize="11"
+                                   VerticalAlignment="Center"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   Text="帧 — / —"/>
+                        <TextBlock x:Name="TrainerTimeText" FontFamily="Consolas, Segoe UI" FontSize="11"
+                                   Margin="12,0,0,0" VerticalAlignment="Center"
+                                   Foreground="{StaticResource TextMutedBrush}"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock x:Name="ZoomText" Text="—" FontFamily="Consolas, Segoe UI"
+                                   FontSize="10" Margin="0,0,6,0" VerticalAlignment="Center"
+                                   Foreground="{StaticResource TextMutedBrush}"/>
+                        <Button Content="−" Style="{StaticResource TransportButton}" Padding="7,0"
+                                Click="ZoomOut_Click" ToolTip="缩小（滚轮下滚同效）"/>
+                        <Button Content="+" Style="{StaticResource TransportButton}" Padding="7,0"
+                                Click="ZoomIn_Click" ToolTip="放大（滚轮上滚同效）"/>
+                        <Button Content="全览" Style="{StaticResource TransportButton}" Padding="8,0"
+                                Margin="2,0,0,0" Click="ZoomFit_Click" ToolTip="缩放到整段可见"/>
+                    </StackPanel>
+                </Grid>
+
+                <!-- 走带：左半区走脚次，中间逐帧/播放，右半区定位与重载 -->
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Content="‹ 上一脚" Style="{StaticResource SecondaryButton}"
+                                Padding="10,4" FontSize="11.5" Click="PrevMark_Click"
+                                ToolTip="跳转至上一脚次"/>
+                        <TextBlock x:Name="TrainerShotText" FontFamily="Consolas, Segoe UI" FontSize="10.5"
+                                   Margin="10,0" VerticalAlignment="Center" MinWidth="96"
+                                   TextAlignment="Center"
+                                   Foreground="{StaticResource TextMutedBrush}" Text="脚次：未载入"/>
+                        <Button Content="下一脚 ›" Style="{StaticResource SecondaryButton}"
+                                Padding="10,4" FontSize="11.5" Click="NextMark_Click"
+                                ToolTip="跳转至下一脚次（按镜头切换生成，无需预先标注）"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center"
+                                VerticalAlignment="Center">
+                        <Button Content="−5s" Style="{StaticResource TransportButton}" Click="JumpBack5_Click"
+                                ToolTip="后退 5 秒"/>
+                        <Button Content="−1s" Style="{StaticResource TransportButton}" Click="JumpBack_Click"
+                                ToolTip="后退 1 秒"/>
+                        <Button Content="−1 帧" Style="{StaticResource FrameStepButton}"
+                                Margin="4,0" Click="StepBack_Click"
+                                ToolTip="后退一帧（25fps ≈ 40ms），← 键同效"/>
+                        <Button x:Name="PlayButton" Content="播放" Style="{StaticResource PrimaryButton}"
+                                Padding="20,5" FontSize="12" Click="TogglePlay_Click"
+                                ToolTip="播放 / 暂停（空格）"/>
+                        <Button Content="+1 帧" Style="{StaticResource FrameStepButton}"
+                                Margin="4,0" Click="StepForward_Click"
+                                ToolTip="前进一帧（25fps ≈ 40ms），→ 键同效"/>
+                        <Button Content="+1s" Style="{StaticResource TransportButton}" Click="JumpForward_Click"
+                                ToolTip="前进 1 秒"/>
+                        <Button Content="+5s" Style="{StaticResource TransportButton}" Click="JumpForward5_Click"
+                                ToolTip="前进 5 秒"/>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="跳至帧" FontSize="10.5" VerticalAlignment="Center"
+                                   Foreground="{StaticResource TextMutedBrush}"/>
+                        <TextBox x:Name="FrameJumpBox" Width="54" Height="24" Margin="6,0"
+                                 Style="{StaticResource ModernTextBox}" Padding="6,2"
+                                 FontFamily="Consolas, Segoe UI" FontSize="11"
+                                 VerticalContentAlignment="Center"
+                                 KeyDown="FrameJumpBox_KeyDown"
+                                 ToolTip="输入帧号后回车跳转"/>
+                        <Button Content="跳转" Style="{StaticResource FrameStepButton}" Padding="8,4"
+                                Click="JumpToFrame_Click" ToolTip="按当前帧号定位"/>
+                        <Button Content="重载画面" Style="{StaticResource TransportButton}"
+                                Margin="4,0,0,0" Click="ReloadTrainerVideo_Click"
+                                ToolTip="画面停滞时重建视频管线并定位至当前帧"/>
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- ================= 底部：状态 + 训练/发布 ================= -->
+        <Border Grid.Row="3" Background="{StaticResource SurfaceBrush}"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,1,0,0" Padding="16,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="TrainerProgressText" FontSize="11" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" Margin="0,0,16,0"
+                           Foreground="{StaticResource TextMutedBrush}"
+                           ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="开始训练" Style="{StaticResource SecondaryButton}"
+                            Padding="16,5" FontSize="12" Click="RunTraining_Click"
+                            ToolTip="用当前门将的全部标注重算区域概率"/>
+                    <Button Content="发布到门将模型库" Style="{StaticResource PrimaryButton}"
+                            Padding="18,5" FontSize="12" Margin="8,0,0,0" Click="PublishTrained_Click"
+                            ToolTip="把最新一代模型写入门将库并同步渲染端"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

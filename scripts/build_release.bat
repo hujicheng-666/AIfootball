@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  AIfootball v2.0 - Release build script (ASCII-only)
+REM  AIfootball v3.0 - Release build script (ASCII-only)
 REM  Stages dist/app for Inno Setup and creates a portable copy.
 REM  DEMO package: no calibration, samples = sample1/2/3 only.
 REM  Requires: .NET 8.0 SDK
@@ -15,7 +15,7 @@ set RUNTIME_DATA=%ROOT%
 
 echo.
 echo ========================================
-echo   AIfootball v2.0 - Release build
+echo   AIfootball v3.0 - Release build
 echo ========================================
 echo.
 
@@ -92,13 +92,12 @@ for %%d in (sample1 sample2 sample3) do (
 )
 echo   OK: samples/ (sample1 sample2 sample3)
 
-REM --- Copy pipeline scripts (runtime/project -> app/project) ---
-if exist "%RUNTIME_DATA%\runtime\project" (
-    mkdir "%OUTPUT%\app\project" 2>nul
-    robocopy "%RUNTIME_DATA%\runtime\project" "%OUTPUT%\app\project" /e /njh /njs >nul
-    if errorlevel 8 exit /b 1
-    echo   OK: project/ (pipeline scripts)
+REM --- Verify the Python engine landed in the publish output (csproj copies it to python_engine\) ---
+if not exist "%OUTPUT%\app\python_engine\aifootball\__main__.py" (
+    echo [ERROR] Python engine is missing from publish output: %OUTPUT%\app\python_engine\aifootball
+    exit /b 1
 )
+echo   OK: python_engine/ (python package)
 
 REM --- Copy Unity viewer ---
 echo [5/6] Copying Unity viewer...
@@ -119,10 +118,10 @@ if not exist "%OUTPUT%\app\viewer\Myproject.exe" exit /b 1
 if not exist "%OUTPUT%\app\viewer\Myproject_Data" exit /b 1
 
 REM --- Create portable copy ---
-set PORTABLE=%OUTPUT%\AIfootball-Portable-v2.0
+set PORTABLE=%OUTPUT%\AIfootball-Portable-v3.0
 xcopy /y /e /q "%OUTPUT%\app\*" "%PORTABLE%\" >nul
 (
-echo AIfootball v2.0 - AI Football Trajectory Analysis Platform
+echo AIfootball v3.0 - AI Football Trajectory Analysis Platform
 echo ========================================
 echo.
 echo This is the DEMO package. Camera calibration files are NOT

@@ -2,7 +2,7 @@
 ; Run scripts\build_release.bat before compiling this script.
 
 #define AppName "AIfootball"
-#define AppVersion "2.0.0"
+#define AppVersion "3.0.0"
 #define AppPublisher "AIfootball Team"
 #define AppExeName "AIfootball.exe"
 #define SourceDir "..\dist\app"
@@ -56,11 +56,12 @@ Name: "{app}\python_env"; Type: filesandordirs
 Name: "{app}\output"; Type: filesandordirs
 ; 运行时录制的样例视频
 Name: "{app}\samples\sample_live"; Type: filesandordirs
-Name: "{app}\samples\unity_*"; Type: filesandordirs
+; WPF → Unity 命令通道
+Name: "{app}\runtime\data\wpf-unity-command.txt"; Type: files
 ; 运行时生成的轨迹 CSV
 Name: "{app}\data\penalty_*_trajectory.csv"; Type: files
 ; Python 字节码缓存（其余由 [Code] 递归清理）
-Name: "{app}\project\__pycache__"; Type: filesandordirs
+Name: "{app}\python_engine\aifootball\__pycache__"; Type: filesandordirs
 
 [Code]
 function InitializeSetup(): Boolean;

@@ -1,2 +1,5 @@
-"""采集模块"""
-from aifootball.capture.dual_camera import DualCameraRecorder
+"""双摄采集模块。"""
+
+from .dual_camera import DualCameraRecorder, FrameClock
+
+__all__ = ["DualCameraRecorder", "FrameClock"]

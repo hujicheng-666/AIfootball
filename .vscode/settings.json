@@ -1,6 +1,16 @@
 {
     "dotnet.preferCSharpExtension": true,
-    "dotnet.defaultSolution": "disable",
-    "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda"
+    "dotnet.defaultSolution": "AIfootball.sln",
+    "files.exclude": {
+        "**/bin": true,
+        "**/obj": true,
+        "**/__pycache__": true
+    },
+    "search.exclude": {
+        "python_env": true,
+        "runtime": true,
+        "output": true,
+        "Myproject/Library": true
+    },
+    "python.defaultInterpreterPath": "${workspaceFolder}/python_env/python.exe"
 }

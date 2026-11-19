@@ -33,7 +33,13 @@
     <AppxManifest Include="Package.appxmanifest" />
   </ItemGroup>
 
+  <!-- 领域层：门将扑救建模、进度解析、工作区路径真相 -->
   <ItemGroup>
+    <ProjectReference Include="..\AIfootball.Core\AIfootball.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
     <PackageReference Include="Microsoft.Xaml.Behaviors.Wpf" Version="1.1.122" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
@@ -46,14 +52,28 @@
     <Resource Include="Resources\SpotIQMark.png" />
   </ItemGroup>
 
+  <!--
+    React 界面产物。改动 src/AIfootball.Web 之后必须先执行：
+        cd src/AIfootball.Web && npm run build
+    这里不用 <Content Include="dist/**">：那样文件列表在编译开始时求值，
+    而 vite 每次 build 都会换文件名，会和 dotnet build 抢文件。
+    改成 Build 之后用 Copy 任务实时枚举，谁先谁后都不会失败。
+  -->
+  <Target Name="CopyWebUi" AfterTargets="Build" Condition="Exists('..\AIfootball.Web\dist')">
+    <ItemGroup>
+      <WebUiFile Include="..\AIfootball.Web\dist\**\*" />
+    </ItemGroup>
+    <!-- vite 每次构建都换 hash 文件名，先清掉旧的，否则历史版本会一直堆在安装包里 -->
+    <RemoveDir Directories="$(OutDir)web" Condition="Exists('$(OutDir)web')" />
+    <Copy SourceFiles="@(WebUiFile)"
+          DestinationFiles="@(WebUiFile->'$(OutDir)web\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+
   <!-- 嵌入 Python 引擎到输出目录 -->
   <ItemGroup>
-    <Content Include="..\AIfootball.Engine\aifootball\**\*"
-             Link="python_engine\aifootball\%(RecursiveDir)%(Filename)%(Extension)"
-             CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="..\AIfootball.Engine\requirements.txt"
-             Link="python_engine\requirements.txt"
-             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\AIfootball.Engine\aifootball\**\*" Link="python_engine\aifootball\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\AIfootball.Engine\requirements.txt" Link="python_engine\requirements.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

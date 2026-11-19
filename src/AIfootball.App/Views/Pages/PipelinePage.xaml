@@ -200,14 +200,14 @@
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
 
-                            <!-- 左路视频流 -->
-                            <TextBlock Text="左路视频流:" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <!-- 左路 UDP/MPEG-TS 视频流 -->
+                            <TextBlock Text="左路 UDP 流:" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0"/>
                             <TextBox Grid.Column="1" Text="{Binding UrlLeft}"
                                      Style="{StaticResource ModernTextBox}"
                                      Margin="0"/>
 
-                            <!-- 右路视频流 -->
-                            <TextBlock Grid.Column="2" Text="右路视频流:" FontSize="13" VerticalAlignment="Center" Margin="16,0,8,0"/>
+                            <!-- 右路 UDP/MPEG-TS 视频流 -->
+                            <TextBlock Grid.Column="2" Text="右路 UDP 流:" FontSize="13" VerticalAlignment="Center" Margin="16,0,8,0"/>
                             <TextBox Grid.Column="3" Text="{Binding UrlRight}"
                                      Style="{StaticResource ModernTextBox}"
                                      Margin="0"/>
@@ -231,7 +231,7 @@
                         <Border Background="{StaticResource SurfaceAltBrush}" CornerRadius="6" Padding="8,6" Margin="0,8,0,12">
                             <TextBlock TextWrapping="Wrap" FontSize="11"
                                        Foreground="{StaticResource TextSecondaryBrush}"
-                                       Text="用法：两台手机安装推流 App（如 Android 的 IP Webcam / RTSP Camera），连接路由器 WiFi，开启推流后在手机上看 IP 与端口。将两个推流地址分别填入左/右路，点「测试连接」确认可达后即可录制。标定请使用同一台手机拍摄棋盘格素材。"/>
+                                       Text="HarmonyOS Camera Bridge 使用 H.265/MPEG-TS UDP。左路默认监听 5000，右路监听 5001；手机端端口需与此一致。UDP 地址无需填写手机 IP。仍兼容 RTSP、MJPEG 和 HTTP 网络相机；标定和正式录制请保持相同分辨率。"/>
                         </Border>
                     </StackPanel>
 
@@ -277,6 +277,10 @@
                             </StackPanel>
                         </Grid>
 
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   Text="这是预览画面（来自采集进程，不写文件）。若某一路一直显示“等待画面”，说明该路还没收到图像，可在日志中查看具体原因；补上推流后直接再点「开始分析」即可。"/>
+
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -308,7 +312,7 @@
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
-                                    <TextBlock Text="左 · 1280×720"
+                                    <TextBlock Text="左路"
                                                Foreground="#88FFFFFF" FontSize="10"
                                                HorizontalAlignment="Left" VerticalAlignment="Bottom"
                                                Margin="8,0,0,6"/>
@@ -339,7 +343,7 @@
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
-                                    <TextBlock Text="右 · 1280×720"
+                                    <TextBlock Text="右路"
                                                Foreground="#88FFFFFF" FontSize="10"
                                                HorizontalAlignment="Left" VerticalAlignment="Bottom"
                                                Margin="8,0,0,6"/>
@@ -348,23 +352,40 @@
                         </Grid>
                     </StackPanel>
 
-                    <!-- 执行 -->
+                    <!-- 执行：先预览，确认画面后再开始分析 -->
+                    <TextBlock TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               Text="点「开始预览」先取流看画面（不写文件、不加载检测模型）；确认构图没问题后再点「开始分析」，这时才开始录制与实时检测。"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="12"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="Auto"/>
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Content="开始录制与处理"
+                        <Button Grid.Column="0" Content="开始预览"
                                 Style="{StaticResource SuccessButton}"
                                 Command="{Binding RunOnlineCommand}"
-                                Width="180"/>
-                        <Button Grid.Column="2" Content="停止"
+                                Width="130"/>
+                        <Button Grid.Column="2" Content="开始分析"
+                                Style="{StaticResource SuccessButton}"
+                                Command="{Binding StartAnalysisCommand}"
+                                Visibility="{Binding IsPreviewing, Converter={StaticResource BoolToVis}}"
+                                Width="130"/>
+                        <Button Grid.Column="4" Content="停止分析"
                                 Style="{StaticResource DangerButton}"
+                                Command="{Binding StopAnalysisCommand}"
+                                Visibility="{Binding IsAnalyzing, Converter={StaticResource BoolToVis}}"
+                                Width="130"
+                                Padding="12,8" MinHeight="40"/>
+                        <Button Grid.Column="5" Content="放弃"
+                                Style="{StaticResource SecondaryButton}"
                                 Command="{Binding CancelCommand}"
                                 Visibility="{Binding IsRunning, Converter={StaticResource BoolToVis}}"
-                                Width="96"
+                                HorizontalAlignment="Right"
+                                Width="80"
                                 Padding="12,8" MinHeight="40"/>
                     </Grid>
                 </StackPanel>

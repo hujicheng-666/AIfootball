@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIfootball · 工作概览 — 设计稿 v2</title>
+<style>
+/* ===========================================================
+   Design tokens
+   同一份 token 需同时生成 CSS 变量与 Themes/Tokens.xaml
+   =========================================================== */
+:root{
+  --brand-700:#1E3A8A;
+  --brand-600:#1E40AF;
+  --brand-500:#2563EB;
+  --brand-400:#3B82F6;
+  --brand-50:#EFF4FF;
+  --accent-600:#B45309;
+  --accent-500:#F59E0B;
+  --accent-50:#FEF6E7;
+  --ok-600:#0F766E;
+  --ok-500:#14B8A6;
+  --ok-50:#ECFDF5;
+  --warn-600:#B45309;
+  --warn-50:#FFFBEB;
+  --risk-600:#B91C1C;
+  --risk-50:#FEF2F2;
+
+  --bg:#F7F9FC;
+  --surface:#FFFFFF;
+  --surface-2:#F7F9FC;
+  --line:#E3E8EF;
+  --line-soft:#EDF1F6;
+  --ink:#0F172A;
+  --ink-2:#475569;
+  --ink-3:#7C8798;
+  --ink-4:#A3AEBD;
+
+  --r-sm:6px;
+  --r-md:8px;
+  --r-lg:12px;
+  --r-xl:16px;
+
+  --sh-1:0 1px 2px rgba(15,23,42,.04);
+  --sh-2:0 1px 2px rgba(15,23,42,.04), 0 2px 6px rgba(15,23,42,.05);
+  --sh-3:0 2px 4px rgba(15,23,42,.04), 0 8px 20px rgba(15,23,42,.07);
+
+  --nav-w:232px;
+  --bar-h:56px;
+  --font:"Inter","Segoe UI Variable Text","Segoe UI","PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;
+  --mono:"JetBrains Mono","SF Mono","Cascadia Mono",Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:var(--font);
+  font-size:13px;
+  line-height:1.6;
+  color:var(--ink);
+  background:var(--bg);
+  -webkit-font-smoothing:antialiased;
+  font-variant-numeric:tabular-nums;
+}
+svg{display:block}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid rgba(37,99,235,.45);outline-offset:2px;border-radius:var(--r-sm)}
+
+.app{display:flex;flex-direction:column;height:100vh;min-width:1180px}
+
+/* ---------------- top bar ---------------- */
+.topbar{
+  height:var(--bar-h);flex:0 0 auto;
+  display:flex;align-items:center;gap:20px;
+  padding:0 20px 0 0;
+  background:var(--surface);
+  border-bottom:1px solid var(--line);
+  position:relative;z-index:20;
+}
+.brand{width:var(--nav-w);height:100%;display:flex;align-items:center;gap:10px;padding-left:20px;border-right:1px solid var(--line)}
+.brand-mark{width:26px;height:26px;border-radius:7px;background:linear-gradient(145deg,#2563EB,#1E3A8A);display:grid;place-items:center;flex:0 0 auto}
+.brand-name{font-size:14px;font-weight:600;letter-spacing:.2px}
+.brand-sub{font-size:10px;color:var(--ink-4);letter-spacing:.6px;text-transform:uppercase;line-height:1}
+.crumb{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-3)}
+.crumb b{color:var(--ink);font-weight:500}
+.crumb-sep{color:var(--ink-4)}
+.topbar-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.searchbox{
+  display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;
+  border:1px solid var(--line);border-radius:var(--r-md);background:var(--surface-2);
+  color:var(--ink-3);font-size:12px;min-width:220px;cursor:text;transition:border-color .18s,background .18s;
+}
+.searchbox:hover{border-color:#D3DAE5;background:var(--surface)}
+.kbd{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-4);border:1px solid var(--line);border-radius:4px;padding:1px 5px;background:var(--surface)}
+.icon-btn{
+  width:32px;height:32px;display:grid;place-items:center;border:1px solid transparent;
+  border-radius:var(--r-md);background:transparent;color:var(--ink-2);cursor:pointer;
+  transition:background .18s,border-color .18s,color .18s;
+}
+.icon-btn:hover{background:var(--surface-2);border-color:var(--line);color:var(--ink)}
+.avatar{width:30px;height:30px;border-radius:50%;background:var(--brand-50);color:var(--brand-600);display:grid;place-items:center;font-size:11px;font-weight:600;border:1px solid #DCE6FA}
+
+/* ---------------- shell ---------------- */
+.shell{flex:1;display:flex;min-height:0}
+
+/* ---------------- sidebar ---------------- */
+.side{
+  width:var(--nav-w);flex:0 0 auto;background:var(--surface);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:14px 12px 12px;
+}
+.side-label{font-size:10px;font-weight:600;letter-spacing:.9px;text-transform:uppercase;color:var(--ink-4);padding:0 10px;margin:6px 0 6px}
+.nav-item{
+  display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:var(--r-md);
+  color:var(--ink-2);font-size:13px;cursor:pointer;transition:background .16s,color .16s;
+}
+.nav-item svg{flex:0 0 auto;color:var(--ink-3);transition:color .16s}
+.nav-item:hover{background:var(--surface-2);color:var(--ink)}
+.nav-item:hover svg{color:var(--ink-2)}
+.nav-item.is-active{background:var(--brand-50);color:var(--brand-600);font-weight:500;position:relative}
+.nav-item.is-active svg{color:var(--brand-600)}
+.nav-item.is-active::before{content:"";position:absolute;left:-12px;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:var(--brand-500)}
+.nav-badge{margin-left:auto;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--brand-500);color:#fff;font-size:10px; font-weight:600;display:grid;place-items:center}
+.nav-count{margin-left:auto;font-size:11px;color:var(--ink-4);font-family:var(--mono)}
+.side-foot{margin-top:auto;padding-top:12px}
+.env-card{border:1px solid var(--line);border-radius:var(--r-lg);padding:12px;background:var(--surface-2)}
+.env-row{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink-2)}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok-500);box-shadow:0 0 0 3px rgba(20,184,166,.14);flex:0 0 auto}
+.env-meta{margin-top:8px;font-size:10.5px;color:var(--ink-4);font-family:var(--mono);letter-spacing:.2px}
+
+/* ---------------- main ---------------- */
+.main{flex:1;min-width:0;overflow-y:auto}
+.main-inner{padding:26px 32px 34px;max-width:1560px}
+
+.page-head{display:flex;align-items:flex-end;gap:16px;margin-bottom:22px}
+.page-title{font-size:26px;font-weight:600;letter-spacing:-.4px;line-height:1.25}
+.page-sub{font-size:13px;color:var(--ink-3);margin-top:4px}
+.page-actions{margin-left:auto;display:flex;align-items:center;gap:8px}
+.btn{
+  display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:var(--r-md);
+  border:1px solid var(--line);background:var(--surface);color:var(--ink-2);font-size:12.5px;
+  font-family:inherit;cursor:pointer;transition:all .18s;box-shadow:var(--sh-1);
+}
+.btn:hover{border-color:#CBD5E1;color:var(--ink);box-shadow:var(--sh-2)}
+.btn-primary{background:var(--brand-600);border-color:var(--brand-600);color:#fff;box-shadow:0 1px 2px rgba(30,64,175,.25)}
+.btn-primary:hover{background:var(--brand-700);border-color:var(--brand-700);color:#fff}
+
+/* ---------------- KPI ---------------- */
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}
+.kpi{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:15px 16px 13px;box-shadow:var(--sh-1);transition:box-shadow .2s,border-color .2s,transform .2s;
+  position:relative;overflow:hidden;cursor:default;
+}
+.kpi:hover{box-shadow:var(--sh-2);border-color:#D6DEE9}
+.kpi-top{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.kpi-ico{width:26px;height:26px;border-radius:var(--r-sm);display:grid;place-items:center;flex:0 0 auto}
+.kpi-label{font-size:11.5px;color:var(--ink-3);letter-spacing:.2px}
+.kpi-tag{margin-left:auto;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:500}
+.kpi-value{font-size:24px;font-weight:600;letter-spacing:-.6px;line-height:1.1;display:flex;align-items:baseline;gap:5px}
+.kpi-value small{font-size:12px;font-weight:400;color:var(--ink-3);letter-spacing:0}
+.kpi-foot{margin-top:9px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-3);min-height:16px}
+.kpi-foot .mono{font-family:var(--mono);font-size:10.5px;color:var(--ink-4)}
+.spark{margin-left:auto;opacity:.9}
+
+/* ---------------- panel ---------------- */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--sh-1)}
+.panel-head{display:flex;align-items:center;gap:10px;padding:14px 16px 12px}
+.panel-title{font-size:13.5px;font-weight:600;letter-spacing:-.1px}
+.panel-desc{font-size:11.5px;color:var(--ink-3);margin-top:1px}
+.panel-tools{margin-left:auto;display:flex;align-items:center;gap:6px}
+
+/* ---------------- pipeline ---------------- */
+.pipeline{margin-bottom:18px}
+.steps{display:grid;grid-template-columns:1fr 40px 1fr 40px 1fr 40px 1fr;align-items:start;padding:4px 18px 20px}
+.step{position:relative}
+.step-top{display:flex;align-items:center;gap:9px}
+.step-num{
+  width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:600;
+  background:var(--surface-2);color:var(--ink-4);border:1px solid var(--line);flex:0 0 auto;
+}
+.step.is-done .step-num{background:var(--ok-50);border-color:#BFE9E2;color:var(--ok-600)}
+.step.is-active .step-num{background:var(--brand-600);border-color:var(--brand-600);color:#fff;box-shadow:0 0 0 4px rgba(37,99,235,.13)}
+.step-name{font-size:13px;font-weight:500;color:var(--ink-3)}
+.step.is-done .step-name,.step.is-active .step-name{color:var(--ink)}
+.step-detail{margin:9px 0 0 35px;font-size:11px;color:var(--ink-3);line-height:1.55}
+.step-detail .mono{font-family:var(--mono);color:var(--ink-2);font-size:10.5px}
+.step-state{margin:7px 0 0 35px;font-size:10.5px;font-weight:500}
+.st-done{color:var(--ok-600)} .st-active{color:var(--brand-600)} .st-idle{color:var(--ink-4)}
+.connector{padding-top:13px;display:grid;place-items:center;color:#D5DDE8}
+.connector.is-pass{color:#A8DCD2}
+.bar{height:3px;border-radius:2px;background:var(--line-soft);margin:11px 0 0 35px;overflow:hidden;max-width:96px}
+.bar i{display:block;height:100%;border-radius:2px;background:linear-gradient(90deg,var(--brand-500),var(--brand-400));width:48%}
+
+/* ---------------- content grid ---------------- */
+.grid-2{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:14px;align-items:start}
+.stack{display:flex;flex-direction:column;gap:14px}
+
+/* ---------------- action cards ---------------- */
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.action{
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;
+  box-shadow:var(--sh-1);cursor:pointer;transition:all .2s;position:relative;
+}
+.action:hover{border-color:#CFDBEC;box-shadow:var(--sh-3);transform:translateY(-1px)}
+.action-ico{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;margin-bottom:12px}
+.action-title{font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px}
+.action-desc{font-size:11.5px;color:var(--ink-3);margin-top:5px;line-height:1.6}
+.action-arrow{position:absolute;right:14px;top:16px;color:var(--ink-4);transition:transform .2s,color .2s}
+.action:hover .action-arrow{transform:translateX(3px);color:var(--brand-600)}
+
+/* ---------------- table ---------------- */
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{
+  text-align:left;font-size:10.5px;font-weight:500;color:var(--ink-4);letter-spacing:.5px;text-transform:uppercase;
+  padding:0 16px 9px;border-bottom:1px solid var(--line-soft);white-space:nowrap;
+}
+.tbl td{padding:11px 16px;border-bottom:1px solid var(--line-soft);font-size:12.5px;color:var(--ink-2)}
+.tbl tbody tr{transition:background .15s}
+.tbl tbody tr:hover{background:#FAFCFF}
+.tbl tbody tr:last-child td{border-bottom:0}
+.cell-name{font-weight:500;color:var(--ink);display:flex;align-items:center;gap:8px}
+.cell-name .mono{font-family:var(--mono);font-size:10px;color:var(--ink-4);font-weight:400}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:500;padding:2px 8px;border-radius:20px;white-space:nowrap}
+.pill-ok{background:var(--ok-50);color:var(--ok-600)}
+.pill-brand{background:var(--brand-50);color:var(--brand-600)}
+.pill-muted{background:#F1F4F8;color:var(--ink-3)}
+.pill-warn{background:var(--warn-50);color:var(--warn-600)}
+.tbl .num{font-family:var(--mono);font-size:11.5px;color:var(--ink-2)}
+.tbl .muted{color:var(--ink-4);font-size:11.5px}
+
+/* ---------------- goalkeeper list ---------------- */
+.gk{padding:6px 16px 14px}
+.gk-row{padding:11px 0;border-bottom:1px solid var(--line-soft)}
+.gk-row:last-child{border-bottom:0;padding-bottom:2px}
+.gk-line{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+.gk-ava{width:24px;height:24px;border-radius:50%;background:#F1F5FB;border:1px solid var(--line);display:grid;place-items:center;font-size:10px;font-weight:600;color:var(--ink-2);flex:0 0 auto}
+.gk-name{font-size:12.5px;font-weight:500}
+.gk-val{margin-left:auto;font-family:var(--mono);font-size:12px;font-weight:500;color:var(--ink)}
+.gk-meter{height:5px;border-radius:3px;background:var(--line-soft);overflow:hidden;margin-left:32px}
+.gk-meter i{display:block;height:100%;border-radius:3px}
+.gk-note{margin:6px 0 0 32px;font-size:10.5px;color:var(--ink-4);display:flex;align-items:center;gap:6px}
+
+/* ---------------- matchup ---------------- */
+.matchup{padding:0 16px 16px}
+.mu-body{display:flex;gap:16px;align-items:center;margin-top:2px}
+.heat{flex:0 0 auto;padding:10px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:var(--r-md)}
+.heat-grid{display:grid;grid-template-columns:repeat(5,26px);grid-template-rows:repeat(3,17px);gap:3px}
+.heat-cell{border-radius:2px}
+.mu-stats{flex:1;min-width:0}
+.mu-rate{font-size:28px;font-weight:600;letter-spacing:-1px;line-height:1}
+.mu-rate span{font-size:13px;font-weight:400;color:var(--ink-3);letter-spacing:0}
+.mu-cap{font-size:11px;color:var(--ink-3);margin-top:5px}
+.mu-pair{display:flex;align-items:center;gap:6px;margin-top:10px;font-size:11px;color:var(--ink-2)}
+.mu-pair .sep{color:var(--ink-4)}
+
+/* ---------------- activity ---------------- */
+.acts{padding:2px 16px 14px}
+.act{display:flex;gap:11px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+.act:last-child{border-bottom:0;padding-bottom:2px}
+.act-rail{display:flex;flex-direction:column;align-items:center;padding-top:4px;flex:0 0 auto}
+.act-dot{width:7px;height:7px;border-radius:50%;background:var(--brand-400);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+.act-dot.ok{background:var(--ok-500);box-shadow:0 0 0 3px rgba(20,184,166,.12)}
+.act-dot.idle{background:var(--ink-4);box-shadow:none}
+.act-body{min-width:0;flex:1}
+.act-text{font-size:12px;color:var(--ink-2)}
+.act-text b{color:var(--ink);font-weight:500}
+.act-meta{font-size:10.5px;color:var(--ink-4);margin-top:2px;font-family:var(--mono)}
+
+/* ---------------- status bar ---------------- */
+.statusbar{
+  height:28px;flex:0 0 auto;display:flex;align-items:center;gap:14px;
+  padding:0 16px;background:var(--surface);border-top:1px solid var(--line);
+  font-size:11px;color:var(--ink-3);
+}
+.statusbar .right{margin-left:auto;display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:10.5px;color:var(--ink-4)}
+.sb-item{display:flex;align-items:center;gap:6px}
+.sb-dot{width:6px;height:6px;border-radius:50%;background:var(--ok-500)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ================= top bar ================= -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><circle cx="12" cy="12" r="2.5"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">AIfootball</div>
+        <div class="brand-sub">Penalty Lab</div>
+      </div>
+    </div>
+
+    <div class="crumb">
+      <span>工作区</span><span class="crumb-sep">/</span><b>概览</b>
+    </div>
+
+    <div class="topbar-right">
+      <div class="searchbox">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span>搜索样本、门将、轨迹…</span>
+        <span class="kbd">Ctrl K</span>
+      </div>
+      <button class="icon-btn" title="刷新" aria-label="刷新">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>
+      </button>
+      <button class="icon-btn" title="通知" aria-label="通知">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 6-2 7-2 7h16s-2-1-2-7"/><path d="M10.5 20a2 2 0 0 0 3 0"/></svg>
+      </button>
+      <div class="avatar">HC</div>
+    </div>
+  </header>
+
+  <div class="shell">
+
+    <!-- ================= sidebar ================= -->
+    <nav class="side">
+      <div class="side-label">工作区</div>
+      <a class="nav-item is-active">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>
+        概览
+      </a>
+      <a class="nav-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg>
+        处理队列
+        <span class="nav-badge">2</span>
+      </a>
+      <a class="nav-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h2.5L8 4h8l1.5 3H20a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.4"/></svg>
+        相机标定
+      </a>
+      <a class="nav-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 8.5 12 4 4 8.5v7L12 20l8-4.5v-7Z"/><path d="M4 8.5 12 13l8-4.5M12 13v7"/></svg>
+        输出与交付
+        <span class="nav-count">3</span>
+      </a>
+
+      <div class="side-label" style="margin-top:16px">模型</div>
+      <a class="nav-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3"/></svg>
+        门将库
+        <span class="nav-count">9</span>
+      </a>
+      <a class="nav-item">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7.5" ry="2.8"/><path d="M4.5 6v6c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V6"/><path d="M4.5 12v6c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-6"/></svg>
+        数据集
+      </a>
+
+      <div class="side-foot">
+        <div class="env-card">
+          <div class="env-row"><span class="dot"></span> 推理环境已就绪</div>
+          <div class="env-meta">PY 3.10 · CUDA 12.1 · YOLO11m</div>
+        </div>
+      </div>
+    </nav>
+
+    <!-- ================= main ================= -->
+    <main class="main">
+      <div class="main-inner">
+
+        <div class="page-head">
+          <div>
+            <h1 class="page-title">工作概览</h1>
+            <p class="page-sub">环境、数据与分析任务的当前状态 · 更新于 17:42</p>
+          </div>
+          <div class="page-actions">
+            <button class="btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              新建样本
+            </button>
+            <button class="btn btn-primary">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13l11-6.5-11-6.5Z"/></svg>
+              开始分析
+            </button>
+          </div>
+        </div>
+
+        <!-- ---------- KPI ---------- -->
+        <section class="kpis">
+          <div class="kpi">
+            <div class="kpi-top">
+              <div class="kpi-ico" style="background:var(--ok-50);color:var(--ok-600)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>
+              </div>
+              <span class="kpi-label">推理环境</span>
+              <span class="kpi-tag" style="background:var(--ok-50);color:var(--ok-600)">已就绪</span>
+            </div>
+            <div class="kpi-value">Python 3.10<small>· YOLO11m</small></div>
+            <div class="kpi-foot"><span class="mono">137 tests passed</span></div>
+          </div>
+
+          <div class="kpi">
+            <div class="kpi-top">
+              <div class="kpi-ico" style="background:var(--brand-50);color:var(--brand-600)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="7" width="10" height="10" rx="2"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></svg>
+              </div>
+              <span class="kpi-label">GPU</span>
+              <span class="kpi-tag" style="background:var(--brand-50);color:var(--brand-600)">空闲</span>
+            </div>
+            <div class="kpi-value">RTX 4060<small>8 GB</small></div>
+            <div class="kpi-foot">
+              <span class="mono">显存占用 22%</span>
+              <svg class="spark" width="52" height="16" viewBox="0 0 52 16" fill="none"><path d="M1 13 8 11 15 12 22 8 29 10 36 6 43 7 51 4" stroke="#3B82F6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+          </div>
+
+          <div class="kpi">
+            <div class="kpi-top">
+              <div class="kpi-ico" style="background:var(--accent-50);color:var(--accent-600)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h2.5L8 4h8l1.5 3H20a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.4"/></svg>
+              </div>
+              <span class="kpi-label">相机标定</span>
+              <span class="kpi-tag" style="background:var(--ok-50);color:var(--ok-600)">可用</span>
+            </div>
+            <div class="kpi-value">0.31<small>px 重投影误差</small></div>
+            <div class="kpi-foot"><span class="mono">内参 12 组 · 外参已绑</span></div>
+          </div>
+
+          <div class="kpi">
+            <div class="kpi-top">
+              <div class="kpi-ico" style="background:#F4F1FE;color:#6D28D9">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="6" rx="7.5" ry="2.8"/><path d="M4.5 6v6c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8V6"/><path d="M4.5 12v6c0 1.5 3.4 2.8 7.5 2.8s7.5-1.3 7.5-2.8v-6"/></svg>
+              </div>
+              <span class="kpi-label">样本</span>
+              <span class="kpi-tag" style="background:#F4F1FE;color:#6D28D9">+1 本周</span>
+            </div>
+            <div class="kpi-value">3<small>个样本 · 36 脚</small></div>
+            <div class="kpi-foot"><span class="mono">2 已完成 · 1 待分析</span></div>
+          </div>
+        </section>
+
+        <!-- ---------- pipeline ---------- -->
+        <section class="panel pipeline">
+          <div class="panel-head">
+            <div>
+              <div class="panel-title">分析链路</div>
+              <div class="panel-desc">sample3 正在拟合落点，交付尚未生成</div>
+            </div>
+            <div class="panel-tools">
+              <span class="pill pill-brand">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg>
+                进行中 · 2 / 4
+              </span>
+            </div>
+          </div>
+
+          <div class="steps">
+            <div class="step is-done">
+              <div class="step-top"><div class="step-num">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>
+              </div><div class="step-name">素材</div></div>
+              <div class="step-detail"><span class="mono">3</span> 个样本 · 双路视频</div>
+              <div class="step-state st-done">已完成</div>
+            </div>
+            <div class="connector is-pass">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+            </div>
+
+            <div class="step is-done">
+              <div class="step-top"><div class="step-num">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>
+              </div><div class="step-name">重建</div></div>
+              <div class="step-detail">三角化 <span class="mono">412</span> 帧 · 轨迹 <span class="mono">36</span> 条</div>
+              <div class="step-state st-done">已完成</div>
+            </div>
+            <div class="connector is-pass">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+            </div>
+
+            <div class="step is-active">
+              <div class="step-top"><div class="step-num">3</div><div class="step-name">拟合</div></div>
+              <div class="step-detail">弹道拟合 · 残差 <span class="mono">0.14 m</span></div>
+              <div class="bar"><i></i></div>
+              <div class="step-state st-active">进行中 · 48%</div>
+            </div>
+            <div class="connector">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+            </div>
+
+            <div class="step">
+              <div class="step-top"><div class="step-num">4</div><div class="step-name">交付</div></div>
+              <div class="step-detail">Unity 回放 / CSV 导出</div>
+              <div class="step-state st-idle">等待上游完成</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ---------- two column ---------- -->
+        <div class="grid-2">
+
+          <div class="stack">
+            <div class="actions">
+              <article class="action">
+                <span class="action-arrow">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+                </span>
+                <div class="action-ico" style="background:var(--brand-50);color:var(--brand-600)">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg>
+                </div>
+                <div class="action-title">离线样本处理</div>
+                <div class="action-desc">三维重建、弹道拟合与 Unity 导出。批量处理整段合集视频。</div>
+              </article>
+
+              <article class="action">
+                <span class="action-arrow">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+                </span>
+                <div class="action-ico" style="background:var(--ok-50);color:var(--ok-600)">
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><circle cx="12" cy="12" r="8.5" stroke-dasharray="2 3"/></svg>
+                </div>
+                <div class="action-title">在线采集</div>
+                <div class="action-desc">双路相机接入，实时预览、录屏并逐帧检测。不落盘只看画面。</div>
+              </article>
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">可用样本</div>
+                  <div class="panel-desc">固定 structure：每样本 left / right 双路录制</div>
+                </div>
+                <div class="panel-tools">
+                  <button class="icon-btn" title="筛选"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg></button>
+                </div>
+              </div>
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th style="width:34%">样本</th>
+                    <th style="width:14%">录制</th>
+                    <th style="width:12%">射门</th>
+                    <th style="width:18%">落点判定</th>
+                    <th style="width:22%">更新时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><span class="cell-name">sample1 <span class="mono">traj</span></span></td>
+                    <td><span class="num">2 路</span></td>
+                    <td><span class="num">12</span></td>
+                    <td><span class="pill pill-ok">射正 67%</span></td>
+                    <td><span class="muted">今天 14:22</span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="cell-name">sample2 <span class="mono">traj</span></span></td>
+                    <td><span class="num">2 路</span></td>
+                    <td><span class="num">9</span></td>
+                    <td><span class="pill pill-ok">射正 55%</span></td>
+                    <td><span class="muted">昨天 19:08</span></td>
+                  </tr>
+                  <tr>
+                    <td><span class="cell-name">sample3 <span class="mono">拟合中</span></span></td>
+                    <td><span class="num">2 路</span></td>
+                    <td><span class="num">15</span></td>
+                    <td><span class="pill pill-warn">待分析</span></td>
+                    <td><span class="muted">11-11 16:40</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">最近活动</div>
+                  <div class="panel-desc">本工作区的处理与训练记录</div>
+                </div>
+                <div class="panel-tools">
+                  <button class="btn" style="height:28px;padding:0 9px;font-size:11.5px;box-shadow:none">全部日志</button>
+                </div>
+              </div>
+              <div class="acts">
+                <div class="act">
+                  <div class="act-rail"><span class="act-dot"></span></div>
+                  <div class="act-body">
+                    <div class="act-text"><b>sample3</b> 弹道拟合进行中 · 残差 0.14 m</div>
+                    <div class="act-meta">17:42 · 预计 1 分钟内完成</div>
+                  </div>
+                </div>
+                <div class="act">
+                  <div class="act-rail"><span class="act-dot ok"></span></div>
+                  <div class="act-body">
+                    <div class="act-text"><b>sample3</b> 三角化完成 · 412 帧 / 36 条轨迹</div>
+                    <div class="act-meta">16:40 · 双路同步误差 3.2 ms</div>
+                  </div>
+                </div>
+                <div class="act">
+                  <div class="act-rail"><span class="act-dot ok"></span></div>
+                  <div class="act-body">
+                    <div class="act-text"><b>sample1</b> 已导出 Unity 回放轨迹与门将绑定</div>
+                    <div class="act-meta">14:22 · data/sample1_trajectory.csv</div>
+                  </div>
+                </div>
+                <div class="act">
+                  <div class="act-rail"><span class="act-dot idle"></span></div>
+                  <div class="act-body">
+                    <div class="act-text"><b>Emi Martinez</b> 模型版本 +1 · 期望扑救率 23.6%</div>
+                    <div class="act-meta">昨天 19:08 · 5 折交叉验证通过</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div class="stack">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">门将库</div>
+                  <div class="panel-desc">真实数据训练 · 期望扑救率</div>
+                </div>
+                <div class="panel-tools"><span class="pill pill-muted">9 个</span></div>
+              </div>
+              <div class="gk">
+                <div class="gk-row">
+                  <div class="gk-line"><span class="gk-ava">EM</span><span class="gk-name">Emi Martinez</span><span class="gk-val">23.6%</span></div>
+                  <div class="gk-meter"><i style="width:23.6%;background:#1E40AF"></i></div>
+                  <div class="gk-note">15 脚样本 · 5 折 logloss 0.616 ✓</div>
+                </div>
+                <div class="gk-row">
+                  <div class="gk-line"><span class="gk-ava">JP</span><span class="gk-name">Jordan Pickford</span><span class="gk-val">21.8%</span></div>
+                  <div class="gk-meter"><i style="width:21.8%;background:#2563EB"></i></div>
+                  <div class="gk-note">17 脚样本 · 5 折 logloss 0.590 ✓</div>
+                </div>
+                <div class="gk-row">
+                  <div class="gk-line"><span class="gk-ava">HL</span><span class="gk-name">Hugo Lloris</span><span class="gk-val">18.8%</span></div>
+                  <div class="gk-meter"><i style="width:18.8%;background:#60A5FA"></i></div>
+                  <div class="gk-note">18 脚样本 · 置信度不足</div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <div class="panel-title">最近对位</div>
+                  <div class="panel-desc">射手 × 门将 · 15 格概率</div>
+                </div>
+              </div>
+              <div class="matchup">
+                <div class="mu-body">
+                  <div class="heat">
+                    <div class="heat-grid">
+                      <div class="heat-cell" style="background:#EEF4FF"></div>
+                      <div class="heat-cell" style="background:#DCE9FE"></div>
+                      <div class="heat-cell" style="background:#F3F7FF"></div>
+                      <div class="heat-cell" style="background:#C7DCFD"></div>
+                      <div class="heat-cell" style="background:#EEF4FF"></div>
+                      <div class="heat-cell" style="background:#A9C9FB"></div>
+                      <div class="heat-cell" style="background:#7EACF6"></div>
+                      <div class="heat-cell" style="background:#93B9F8"></div>
+                      <div class="heat-cell" style="background:#5E96F2"></div>
+                      <div class="heat-cell" style="background:#B4CFFB"></div>
+                      <div class="heat-cell" style="background:#D3E4FE"></div>
+                      <div class="heat-cell" style="background:#2F72E8"></div>
+                      <div class="heat-cell" style="background:#1E5BD0"></div>
+                      <div class="heat-cell" style="background:#4D87EE"></div>
+                      <div class="heat-cell" style="background:#E4EEFE"></div>
+                    </div>
+                  </div>
+                  <div class="mu-stats">
+                    <div class="mu-rate">68<span>%</span></div>
+                    <div class="mu-cap">sample1 × Emi Martinez<br>射手胜率（预测）</div>
+                    <div class="mu-pair">
+                      <span>右下角</span><span class="sep">·</span><span>置信度 中</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ================= status bar ================= -->
+  <footer class="statusbar">
+    <div class="sb-item"><span class="sb-dot"></span> 就绪</div>
+    <div class="sb-item">最近任务：sample3 拟合 · 48%</div>
+    <div class="right">
+      <span>RTX 4060 · 8 GB</span>
+      <span>v2.0.0</span>
+      <span>UTF-8</span>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

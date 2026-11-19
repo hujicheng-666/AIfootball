@@ -1,20 +1,37 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "probe-cmd",
-			"type": "shell",
-			"command": "echo task-ok > d:\\AIfootball\\probe2.txt"
-		},
-		{
-			"label": "find-iscc",
-			"type": "shell",
-			"command": "d:\\AIfootball\\python_env\\python.exe d:\\AIfootball\\find_iscc.py > d:\\AIfootball\\find_result.txt 2>&1"
-		},
-		{
-			"label": "show-find",
-			"type": "shell",
-			"command": "d:\\AIfootball\\python_env\\python.exe -c \"print(open(r'd:\\AIfootball\\find_result.txt',encoding='utf-16').read())\""
-		}
-	]
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "构建解决方案",
+            "type": "shell",
+            "command": "dotnet build AIfootball.sln",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "运行应用",
+            "type": "shell",
+            "command": "dotnet run --project src/AIfootball.App/AIfootball.App.csproj",
+            "problemMatcher": []
+        },
+        {
+            "label": "单元测试（C#）",
+            "type": "shell",
+            "command": "dotnet test AIfootball.sln",
+            "group": { "kind": "test", "isDefault": true },
+            "problemMatcher": []
+        },
+        {
+            "label": "单元测试（Python 引擎）",
+            "type": "shell",
+            "command": "python_env/python.exe -m unittest discover -s tests/engine -t .",
+            "problemMatcher": []
+        },
+        {
+            "label": "界面自检（离屏渲染 + 报告）",
+            "type": "shell",
+            "command": "src/AIfootball.App/bin/Debug/net8.0-windows10.0.19041.0/win-x64/AIfootball.exe --diagnose",
+            "problemMatcher": []
+        }
+    ]
 }

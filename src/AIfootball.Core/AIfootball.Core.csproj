@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>AIfootball.Core</RootNamespace>
+    <AssemblyName>AIfootball.Core</AssemblyName>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <!-- 领域层不依赖任何 UI 框架：可被单元测试直接引用 -->
+    <UseWPF>false</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+  </PropertyGroup>
+
+</Project>

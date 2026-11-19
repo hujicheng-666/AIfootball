@@ -31,6 +31,14 @@ public class MainViewModel : ViewModelBase, IDisposable
         SetupEnvironmentCommand = new RelayCommand(async () => await OnSetupEnvironment());
     }
 
+    // ─── 点球手画像（由分析页触发生成） ───
+    private ShooterProfileSnapshot? _shooterProfile;
+    public ShooterProfileSnapshot? ShooterProfile
+    {
+        get => _shooterProfile;
+        set => SetProperty(ref _shooterProfile, value);
+    }
+
     // ─── 环境状态 ───
     private bool _isEnvironmentReady;
     public bool IsEnvironmentReady
@@ -39,7 +47,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _isEnvironmentReady, value);
     }
 
-    private string _envStatusText = "正在检查环境...";
+    private string _envStatusText = "正在检测计算环境…";
     public string EnvStatusText
     {
         get => _envStatusText;
@@ -107,7 +115,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         private set => SetProperty(ref _pipelineStage, value);
     }
 
-    private string _pipelineStatusText = "等待处理任务";
+    private string _pipelineStatusText = "待执行";
     public string PipelineStatusText
     {
         get => _pipelineStatusText;
@@ -138,11 +146,62 @@ public class MainViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _calibrationProgress, value);
     }
 
-    private string _calibrationProgressText = "等待标定任务";
+    private string _calibrationProgressText = "待执行";
     public string CalibrationProgressText
     {
         get => _calibrationProgressText;
         set => SetProperty(ref _calibrationProgressText, value);
+    }
+
+    // ─── 标定表单（Web 界面是受控组件，值存在这里，切页再回来不会丢） ───
+    private string _calibLeftChessVideo = "";
+    public string CalibLeftChessVideo
+    {
+        get => _calibLeftChessVideo;
+        set => SetProperty(ref _calibLeftChessVideo, value);
+    }
+
+    private string _calibRightChessVideo = "";
+    public string CalibRightChessVideo
+    {
+        get => _calibRightChessVideo;
+        set => SetProperty(ref _calibRightChessVideo, value);
+    }
+
+    private string _calibLeftFieldImage = "";
+    public string CalibLeftFieldImage
+    {
+        get => _calibLeftFieldImage;
+        set => SetProperty(ref _calibLeftFieldImage, value);
+    }
+
+    private string _calibRightFieldImage = "";
+    public string CalibRightFieldImage
+    {
+        get => _calibRightFieldImage;
+        set => SetProperty(ref _calibRightFieldImage, value);
+    }
+
+    private string _calibIntrinsicsStatus = "";
+    public string CalibIntrinsicsStatus
+    {
+        get => _calibIntrinsicsStatus;
+        set => SetProperty(ref _calibIntrinsicsStatus, value);
+    }
+
+    private string _calibExtrinsicsStatus = "";
+    public string CalibExtrinsicsStatus
+    {
+        get => _calibExtrinsicsStatus;
+        set => SetProperty(ref _calibExtrinsicsStatus, value);
+    }
+
+    /// <summary>已经确认过一次内参/外参都就绪时，标定页先折叠成"已完成"入口。</summary>
+    private bool _calibShowWorkflow;
+    public bool CalibShowWorkflow
+    {
+        get => _calibShowWorkflow;
+        set => SetProperty(ref _calibShowWorkflow, value);
     }
 
     // ─── 命令 ───
@@ -154,19 +213,32 @@ public class MainViewModel : ViewModelBase, IDisposable
         AddLog("info", "═══════ 系统自检开始 ═══════");
         AddLog("info", $"工作目录: {_pythonEngine.WorkspaceDir}");
 
-        // 1. 检查 Python 环境
+        // 1. 引擎自检：统一走 `aifootball selfcheck`，界面与命令行看到同一份结论
         try
         {
-            IsEnvironmentReady = await _pythonEngine.IsEnvironmentReadyAsync();
+            var check = await _pythonEngine.RunSelfCheckAsync(force: true);
+            IsEnvironmentReady = check?.HasCoreDependencies == true;
+
+            if (check is not null)
+            {
+                AddLog("info",
+                    $"🐍 Python {check.Python ?? "?"} · torch {check.Torch ?? "缺失"} · " +
+                    $"opencv {check.OpenCv ?? "缺失"} · ultralytics {check.Ultralytics ?? "缺失"}");
+                AddLog(check.Cuda ? "info" : "warn",
+                    check.Cuda ? "⚡ CUDA: 可用" : "⚡ CUDA: 不可用（CPU 推理）");
+                if (!check.ModelPresent)
+                    AddLog("warn", $"⚠ 检测模型缺失: {check.Model ?? "models/yolo11m.pt"}");
+            }
+
             if (IsEnvironmentReady)
             {
                 await SetReadyStateAsync();
             }
             else
             {
-                AddLog("warn", "⚠ Python 推理环境: 未就绪");
+                AddLog("warn", $"⚠ Python 推理环境: 未就绪（缺少 {check?.MissingSummary() ?? "python_env"}）");
                 AddLog("info", "   → 请点击「一键安装环境」自动配置");
-                EnvStatusText = "首次运行：需要安装 Python 推理环境";
+                EnvStatusText = "首次运行：Python 推理环境未安装";
                 StatusBarText = "环境未就绪 — 点击「一键安装环境」";
                 SetupProgressVisible = false;
             }
@@ -174,7 +246,7 @@ public class MainViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             AddLog("error", $"✗ 环境检测失败: {ex.Message}");
-            EnvStatusText = $"错误: {ex.Message}";
+            EnvStatusText = $"异常：{ex.Message}";
         }
 
         // 2. 无论环境是否就绪，检测 GPU
@@ -240,7 +312,7 @@ public class MainViewModel : ViewModelBase, IDisposable
     private async Task SetReadyStateAsync()
     {
         IsEnvironmentReady = true;
-        EnvStatusText = "Python 环境就绪 ✓";
+        EnvStatusText = "Python 环境就绪";
         SetupProgressVisible = false;
         IsSettingUp = false;
 
@@ -362,7 +434,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             var progress = new Progress<(string Message, string Level)>(p => ReportCalibration(p.Message, p.Level));
             var ok = await _pipelineService.CalibrateIntrinsicsAsync(leftVideo, rightVideo, calibDir, progress);
             CalibrationProgress = ok ? 100 : CalibrationProgress;
-            CalibrationProgressText = ok ? "内参标定完成" : "内参标定失败，详情已写入日志文件";
+            CalibrationProgressText = ok ? "内参标定完成" : "内参标定失败，详情见日志";
             AddLog(ok ? "success" : "error", ok ? "内参标定完成" : "内参标定失败");
             await RefreshListsAsync();
             return ok;
@@ -387,7 +459,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             var progress = new Progress<(string Message, string Level)>(p => ReportCalibration(p.Message, p.Level));
             var ok = await _pipelineService.CalibrateExtrinsicsAsync(leftImage, rightImage, calibDir, progress);
             CalibrationProgress = ok ? 100 : CalibrationProgress;
-            CalibrationProgressText = ok ? "外参标定完成" : "外参标定失败，详情已写入日志文件";
+            CalibrationProgressText = ok ? "外参标定完成" : "外参标定失败，详情见日志";
             AddLog(ok ? "success" : "error", ok ? "外参标定完成" : "外参标定失败");
             await RefreshListsAsync();
             return ok;
@@ -425,7 +497,7 @@ public class MainViewModel : ViewModelBase, IDisposable
                 await SetReadyStateAsync();
             else
             {
-                EnvStatusText = "安装失败，详情已写入 logs 文件夹";
+                EnvStatusText = "安装失败，详情见 logs/";
                 SetupProgressVisible = false;
                 IsSettingUp = false;
             }
@@ -435,7 +507,7 @@ public class MainViewModel : ViewModelBase, IDisposable
             AddLog("error", $"❌ 安装异常: {ex.GetType().Name}: {ex.Message}");
             if (ex.InnerException != null)
                 AddLog("error", $"   内部错误: {ex.InnerException.Message}");
-            EnvStatusText = $"安装失败: {ex.Message}";
+            EnvStatusText = $"安装失败：{ex.Message}";
             SetupProgressVisible = false;
             IsSettingUp = false;
         }

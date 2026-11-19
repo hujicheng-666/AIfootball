@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.IO;
 using System.Text.Json;
 using AIfootball.App.Models;
 using AIfootball.App.Services.Interfaces;
+using AIfootball.Core.Models;
 
 namespace AIfootball.App.Services;
 
@@ -34,13 +36,20 @@ public class PipelineService : IPipelineService
                 var output3d = Path.Combine(_engine.WorkspaceDir, "output", "trajectory_3d", name);
                 var outputB = Path.Combine(_engine.WorkspaceDir, "output", "trajectory_ballistic", name);
                 var unityCsv = Path.Combine(_engine.WorkspaceDir, "data", $"{name}_trajectory.csv");
+                // 落点随扫描一起带出，样本列表不用再点开才看得到结果
+                var shot = File.Exists(Path.Combine(outputB, "ballistic_fit_summary.json"))
+                    ? LoadShotPlacement(name)
+                    : null;
                 return new
                 {
                     IsValid = leftVideos.Length == 1 && rightVideos.Length == 1,
                     Sample = new SampleInfo(name, d, leftVideos.Length + rightVideos.Length,
                         Directory.Exists(output3d),
                         Directory.Exists(outputB),
-                        File.Exists(unityCsv))
+                        File.Exists(unityCsv),
+                        shot?.Lateral,
+                        shot?.Height,
+                        shot?.Speed)
                 };
             })
             // A valid sample has one video for each calibrated camera.  Do not
@@ -80,6 +89,93 @@ public class PipelineService : IPipelineService
         {
             string json = File.ReadAllText(path);
             return System.Text.Json.JsonSerializer.Deserialize<GoalkeeperStats>(json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 保存（或另存）门将属性。写入的是 Unity 播放器读的同一份文件，
+    /// 因此界面里改完立刻对回放生效。
+    /// </summary>
+    public bool SaveGoalkeeperStats(string name, GoalkeeperStats stats, out string message)
+    {
+        message = "";
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            message = "门将名称不能为空";
+            return false;
+        }
+
+        if (name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            message = "名称不能包含 \\ / : * ? \" < > | 等字符";
+            return false;
+        }
+
+        var gkDir = Path.Combine(_engine.WorkspaceDir, "data", "goalkeepers");
+        var path = Path.Combine(gkDir, $"{name}.json");
+        try
+        {
+            Directory.CreateDirectory(gkDir);
+            // NaN/Infinity 序列化会抛异常，正好在这里挡住坏数据，而不是写出
+            // 一份 Unity 解析不了的文件。
+            File.WriteAllText(path, JsonSerializer.Serialize(stats,
+                new JsonSerializerOptions { WriteIndented = true }));
+            message = $"已保存 data/goalkeepers/{name}.json";
+            return true;
+        }
+        catch (Exception ex)
+        {
+            message = $"保存失败：{ex.Message}";
+            return false;
+        }
+    }
+
+    public ShotPlacementSummary LoadShotPlacements(IEnumerable<string> sampleNames)
+    {
+        var shots = new List<ShotPlacement>();
+        foreach (var sampleName in sampleNames
+                     .Where(name => !string.IsNullOrWhiteSpace(name))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var shot = LoadShotPlacement(sampleName);
+            if (shot is not null) shots.Add(shot);
+        }
+        return new ShotPlacementSummary(shots);
+    }
+
+    private ShotPlacement? LoadShotPlacement(string sampleName)
+    {
+        var path = Path.Combine(_engine.WorkspaceDir, "output", "trajectory_ballistic",
+            sampleName, "ballistic_fit_summary.json");
+        if (!File.Exists(path)) return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var root = document.RootElement;
+            if (!root.TryGetProperty("goal_line_crossing", out var crossing)) return null;
+            if (!crossing.TryGetProperty("detected", out var detected)
+                || detected.ValueKind != JsonValueKind.True) return null;
+            if (!crossing.TryGetProperty("point_xyz_m", out var point)
+                || point.ValueKind != JsonValueKind.Array || point.GetArrayLength() < 3) return null;
+
+            // 场地坐标：x = 球门线横向（右为正），z = 离地高度
+            double lateral = point[0].GetDouble();
+            double height = point[2].GetDouble();
+            double speed = root.TryGetProperty("initial_speed_mps", out var speedElement)
+                           && speedElement.ValueKind == JsonValueKind.Number
+                ? speedElement.GetDouble()
+                : 0;
+            double flightTime = crossing.TryGetProperty("time_sec", out var timeElement)
+                                && timeElement.ValueKind == JsonValueKind.Number
+                ? timeElement.GetDouble()
+                : 0;
+
+            return new ShotPlacement(sampleName, lateral, height, flightTime, speed);
         }
         catch
         {
@@ -170,9 +266,28 @@ public class PipelineService : IPipelineService
     private string GetTrajectoryMetadataPath(string sampleName) =>
         Path.Combine(_engine.WorkspaceDir, "data", $"{sampleName}_trajectory.meta.json");
 
+    /// <summary>把「向采集进程下发指令」的能力交给界面，失败只写调试输出。</summary>
+    private static Action<StreamWriter>? BuildInputBridge(Action<Action<string>>? onControlReady)
+    {
+        if (onControlReady == null) return null;
+        return writer => onControlReady(command =>
+        {
+            try
+            {
+                writer.WriteLine(command);
+            }
+            catch (Exception ex)
+            {
+                // 进程已经退出时写入会失败，这里只记录，不影响任务结果
+                Debug.WriteLine($"[采集控制] 下发 {command} 失败: {ex.Message}");
+            }
+        });
+    }
+
     public async Task<bool> RunOnlineAsync(
         string camLeft, string camRight, string sampleName,
-        IProgress<(string, string)>? logProgress, CancellationToken cancellation)
+        IProgress<(string, string)>? logProgress, CancellationToken cancellation,
+        Action<Action<string>>? onControlReady = null)
     {
         // 本地索引或网络 URL 都直接透传给 Python 引擎（引擎已支持 RTSP/HTTP 流）
         var isNetwork = camLeft.Contains("://", StringComparison.Ordinal)
@@ -185,16 +300,20 @@ public class PipelineService : IPipelineService
             _engine.EngineEntryPath,
             $"online --cam-left \"{camLeft}\" --cam-right \"{camRight}\" --sample \"{sampleName}\" " +
             $"--workspace \"{_engine.WorkspaceDir}\"",
+            // 预览 + 录制由用户自己控制时长，不能用一个固定墙钟时间把它掐掉
+            timeoutMs: Timeout.Infinite,
             cancellation: cancellation,
             outputReceived: line => logProgress?.Report((line, "output")),
-            errorReceived: line => logProgress?.Report((line, "error")));
+            errorReceived: line => logProgress?.Report((line, "error")),
+            inputReady: BuildInputBridge(onControlReady));
 
         return code == 0;
     }
 
     public async Task<bool> RunOnlineLiveAsync(
         string camLeft, string camRight, string sampleName,
-        IProgress<(string, string)>? logProgress, CancellationToken cancellation)
+        IProgress<(string, string)>? logProgress, CancellationToken cancellation,
+        Action<Action<string>>? onControlReady = null)
     {
         var isNetwork = camLeft.Contains("://", StringComparison.Ordinal)
                         || camRight.Contains("://", StringComparison.Ordinal);
@@ -206,10 +325,12 @@ public class PipelineService : IPipelineService
             _engine.EngineEntryPath,
             $"online-live --cam-left \"{camLeft}\" --cam-right \"{camRight}\" " +
             $"--sample \"{sampleName}\" --workspace \"{_engine.WorkspaceDir}\"",
-            timeoutMs: 1800000,
+            // 预览停留多久、分析录多久都由用户决定，这里不设墙钟上限
+            timeoutMs: Timeout.Infinite,
             cancellation: cancellation,
             outputReceived: line => logProgress?.Report((line, "output")),
-            errorReceived: line => logProgress?.Report((line, "error")));
+            errorReceived: line => logProgress?.Report((line, "error")),
+            inputReady: BuildInputBridge(onControlReady));
 
         return code == 0;
     }

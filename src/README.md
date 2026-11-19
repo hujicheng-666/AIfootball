@@ -10,9 +10,13 @@
 ```
 src/
 ├── AIfootball.sln                  # Visual Studio 解决方案
-├── AIfootball.Engine/              # Python 引擎 CLI（算法主体在 runtime/project/）
+├── AIfootball.Engine/              # Python 引擎（算法主体就在本包里，唯一一份）
 │   ├── aifootball/
-│   │   ├── __main__.py             # CLI 入口（委托 runtime/project 脚本）
+│   │   ├── __main__.py             # 入口：python -u aifootball/__main__.py <子命令>
+│   │   ├── cli.py                  # 全部子命令（离线/在线/标定/自检…）
+│   │   ├── workspace.py            # 工作区惰性解析（取代旧的 config.py）
+│   │   ├── pipeline/               # 重建 / 弹道拟合 / 边录边分析 / Unity 导出
+│   │   ├── calibration/            # 内参（含照片模式）/ 外参标定
 │   │   └── capture/
 │   │       └── dual_camera.py      # 双摄同步录制
 │   ├── requirements.txt

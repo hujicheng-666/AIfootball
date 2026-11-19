@@ -1,0 +1,22 @@
+<UserControl x:Class="AIfootball.App.Views.Web.WebHost"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+             Background="#F7F9FC">
+    <Grid>
+        <wv2:WebView2 x:Name="View" />
+
+        <!-- 首帧之前盖住白闪；WebView2 初始化失败时也在这里显示原因 -->
+        <Border x:Name="BootLayer" Background="#F7F9FC">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
+                <TextBlock x:Name="BootTitle" Text="正在加载界面"
+                           FontFamily="Microsoft YaHei UI" FontSize="13" Foreground="#7C8798"
+                           HorizontalAlignment="Center"/>
+                <TextBlock x:Name="BootDetail" Text=""
+                           FontFamily="Microsoft YaHei UI" FontSize="11.5" Foreground="#A3AEBD"
+                           TextWrapping="Wrap" Margin="0,8,0,0" HorizontalAlignment="Center"
+                           TextAlignment="Center" Visibility="Collapsed"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

@@ -1,72 +1,67 @@
 # ============================================================
-# AIfootball .gitignore
+#  AIfootball .gitignore
+#  原则：源码 / 文档 / 建模资产 / 运行环境（python_env）入库；
+#        构建产物、编辑器缓存、运行期数据不入库。
+#        大二进制由 Git LFS 管理（见 .gitattributes）。
 # ============================================================
 
-# --- 超过 GitHub 100MB 单文件限制，无法直接推送（需 LFS 或排除）---
-python_env/Lib/site-packages/torch/lib/torch_cpu.dll
-python_env/Lib/site-packages/_polars_runtime_32/_polars_runtime.pyd
-
-# --- .NET 编译产物 ---
+# --- .NET 编译产物（可重新编译产生，不入库）---
 [Bb]in/
 [Oo]bj/
 *.user
 *.suo
+*.sln.docstates
+.vs/
 
-# --- Python 缓存 ---
+# --- Unity 构建产物与编辑器缓存（可重新生成，不入库）---
+/_build_demo/
+/runtime/
+/Myproject/Library/
+/Myproject/Temp/
+/Myproject/Logs/
+/Myproject/UserSettings/
+/Myproject/Builds/
+/Myproject/obj/
+/Myproject/data/
+/Myproject/.tmp_synth/
+/Myproject/.agents/
+*.unitypackage
+
+# --- Python 字节码缓存（解释器本体入库，缓存不入库）---
 __pycache__/
 *.py[cod]
 *.egg-info/
 *.egg
+.pytest_cache/
 
-# --- Unity 工程缓存（Myproject/.gitignore 也有覆盖，这里兜底）---
-Myproject/Library/
-Myproject/Temp/
-Myproject/Logs/
-Myproject/UserSettings/
-Myproject/Builds/
+# --- 前端依赖与构建输出 ---
+src/AIfootball.Web/node_modules/
+src/AIfootball.Web/dist/
+src/AIfootball.Web/.vite/
 
-# --- 构建验证/临时产物 ---
+# --- 运行期数据与本地输出 ---
+/data/
+/logs/
+/calib/
+/output/*
+!/output/blender/
+/output/blender/*.blend1
+/output/blender/preview*/
+
+# --- 打包/发布产物 ---
+dist/
+*.msix
+*.msixbundle
 .build-check/
 
-# --- 系统/编辑器文件 ---
+# --- AI 工具工作目录（会话记录、记忆、缓存，不入库）---
+/.workbuddy/
+/.codebuddy/
+
+# --- 临时/系统文件 ---
+.tmp_*
+*.tmp
+*.log
 Thumbs.db
 Desktop.ini
 .DS_Store
-
-# --- Local Python virtual environment (kept on developer machines only) ---
-python_env/
-logs/
-# --- Runtime generated files (never commit) ---
-runtime/data/wpf-unity-command.txt
-runtime/data/wpf-bridge-debug.txt
-
-# --- 重建/检测中间缓存（重跑可复用，不入库）---
-output/track_cache/
-
-# --- 本地生成结果 / 运行数据（README 明确不作为源码提交）---
-/output/
-/calib/
-/data/
-/Myproject/
-/top/
-/runtime/output/
-/runtime/calib/
-/runtime/data/
-/runtime/samples/
-
-# --- Local git/debug helper snapshots ---
-_git*.txt
-_git*.log
-_proc.txt
-_ghcreate.txt
-
-# --- 本地/装机辅助文件（不进仓库，仅本机保留）---
-.agents/
-AGENT.md
-DSH-Desktop-*.exe
-download-update.mjs
-install-log.txt
-install-run.ps1
-assets/icons/AIfootball.previous.ico
-4a*.jpg
-samples/sample_live/

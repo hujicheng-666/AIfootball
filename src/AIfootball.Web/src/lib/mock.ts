@@ -1,0 +1,153 @@
+import type { AppState, Keeper } from "../lib/bridge";
+
+/**
+ * 只在浏览器里直接打开（npm run dev / 预览截图）时使用。
+ * 进入 WebView2 后，这里的值会被宿主推来的真实状态覆盖。
+ */
+const zones = (seed: number) =>
+  Array.from({ length: 15 }, (_, i) =>
+    Number((0.22 + 0.46 * Math.abs(Math.sin(seed + i * 1.7))).toFixed(3)),
+  );
+
+const keeper = (name: string, seed: number, dive: number, keep: number): Keeper => ({
+  name,
+  displayName: name,
+  description: "示例数据",
+  attrs: {
+    height: 1.88,
+    diveSpeed: dive,
+    jumpDistance: 1.05,
+    jumpHeight: 0.52,
+    reach: 0.55,
+    tendGoalSpeed: 3.2,
+    goalKeeping: keep,
+    sidePreference: 0,
+    heightPreference: 0,
+  },
+  zones: zones(seed),
+  hasZones: true,
+});
+
+export const mockState: AppState = {
+  shooter: {
+    hasData: true,
+    countText: "有效轨迹 24 条 · 重复 3 条",
+    lines: [
+      "射门力量  18.6 m/s",
+      "横向落点  +0.42 m",
+      "落点高度  0.86 m",
+      "落点离散  0.74 m",
+      "方向偏好  右侧",
+      "高度偏好  中低",
+      "稳定性    较稳定",
+    ],
+    radarLabels: ["力量", "稳定", "左路", "高度", "变化"],
+    radarValues: [0.62, 0.71, 0.34, 0.48, 0.29],
+    emptyText: "",
+  },
+  env: { ready: true, statusText: "Python 环境就绪", settingUp: false, setupProgress: 0 },
+  gpu: {
+    name: "NVIDIA GeForce RTX 4060 Laptop GPU",
+    cudaAvailable: true,
+    dedicated: true,
+    cudaVersion: "12.1",
+  },
+  calibration: {
+    intrinsics: true,
+    extrinsics: true,
+    ready: true,
+    running: false,
+    progress: 0,
+    progressText: "",
+    leftChess: "",
+    rightChess: "",
+    leftField: "",
+    rightField: "",
+    intrinsicsStatus: "",
+    extrinsicsStatus: "",
+    showWorkflow: false,
+  },
+  pipeline: { stage: 3, statusText: "拟合中" },
+  run: {
+    running: false,
+    previewing: false,
+    analyzing: false,
+    testingStream: false,
+    progress: 0,
+    progressText: "等待开始",
+    previewVisible: true,
+    previewLeftStamp: 0,
+    previewRightStamp: 0,
+    steps: [
+      { name: "检测", description: "YOLO11m", status: "completed" },
+      { name: "三角化", description: "412 帧", status: "completed" },
+      { name: "弹道拟合", description: "残差 0.14m", status: "running" },
+      { name: "交付导出", description: "Unity CSV", status: "pending" },
+    ],
+  },
+  form: {
+    samples: [
+      { name: "sample1", selected: false },
+      { name: "sample2", selected: false },
+      { name: "sample3", selected: false },
+    ],
+    skipReconstruct: false,
+    skipBallistic: false,
+    selectedGoalkeeper: "",
+    usbMode: true,
+    networkMode: false,
+    camLeft: "0",
+    camRight: "1",
+    camerasText: "",
+    urlLeft: "udp://@0.0.0.0:5000?fifo_size=5000000&overrun_nonfatal=1&buffer_size=8388608",
+    urlRight: "udp://@0.0.0.0:5001?fifo_size=5000000&overrun_nonfatal=1&buffer_size=8388608",
+    networkTestText: "",
+    sampleName: "sample_live",
+    liveAnalysis: false,
+  },
+  samples: [
+    {
+      name: "sample1",
+      videos: 2,
+      has3D: true,
+      hasBallistic: true,
+      hasCsv: true,
+      shotSummary: "右侧 · 中",
+      verdict: "射正",
+      updated: "今天 14:22",
+    },
+    {
+      name: "sample2",
+      videos: 2,
+      has3D: true,
+      hasBallistic: true,
+      hasCsv: true,
+      shotSummary: "左侧 · 低",
+      verdict: "射正",
+      updated: "昨天 19:08",
+    },
+    {
+      name: "sample3",
+      videos: 2,
+      has3D: true,
+      hasBallistic: false,
+      hasCsv: false,
+      shotSummary: "",
+      verdict: "",
+      updated: "11-11 16:40",
+    },
+  ],
+  goalkeepers: [
+    keeper("Emi Martinez", 1.1, 4.5, 0.88),
+    keeper("Jordan Pickford", 2.3, 4.2, 0.85),
+    keeper("Hugo Lloris", 3.7, 4.0, 0.83),
+    keeper("Manuel Neuer", 4.9, 4.6, 0.87),
+    keeper("Thibaut Courtois", 5.8, 4.1, 0.89),
+    keeper("Alisson Becker", 6.6, 4.3, 0.86),
+    keeper("David de Gea", 7.4, 4.4, 0.84),
+    keeper("Jan Oblak", 8.2, 4.2, 0.88),
+    keeper("Ederson", 9.0, 4.0, 0.82),
+  ],
+  statusBar: "NVIDIA CUDA 推理: RTX 4060",
+  version: "2.0.0",
+};

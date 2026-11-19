@@ -1,12 +1,14 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
-using System.Text.RegularExpressions;
 using System.IO;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using AIfootball.App.Models;
 using AIfootball.App.Services.Interfaces;
+using AIfootball.Core.Services;
+using PipelineStage = AIfootball.Core.Models.PipelineStage;
+using StageState = AIfootball.Core.Models.StageState;
 
 namespace AIfootball.App.ViewModels;
 
@@ -31,6 +33,10 @@ public class PipelineViewModel : ViewModelBase
         DetectCamerasCommand = new RelayCommand(async () => await DetectCamerasAsync());
         TestNetworkCommand = new RelayCommand(async () => await TestNetworkAsync());
         CancelCommand = new RelayCommand(OnCancel, () => IsRunning);
+        StartAnalysisCommand = new RelayCommand(OnStartAnalysis,
+            () => IsPreviewing && _sendControl != null);
+        StopAnalysisCommand = new RelayCommand(OnStopAnalysis,
+            () => IsAnalyzing && _sendControl != null);
     }
 
     // ─── 离线模式 ───
@@ -103,14 +109,14 @@ public class PipelineViewModel : ViewModelBase
         }
     }
 
-    private string _urlLeft = "http://192.168.1.101:8080/video";
+    private string _urlLeft = "udp://@0.0.0.0:5000?fifo_size=5000000&overrun_nonfatal=1&buffer_size=8388608";
     public string UrlLeft
     {
         get => _urlLeft;
         set => SetProperty(ref _urlLeft, value);
     }
 
-    private string _urlRight = "http://192.168.1.102:8080/video";
+    private string _urlRight = "udp://@0.0.0.0:5001?fifo_size=5000000&overrun_nonfatal=1&buffer_size=8388608";
     public string UrlRight
     {
         get => _urlRight;
@@ -165,19 +171,92 @@ public class PipelineViewModel : ViewModelBase
         set => SetProperty(ref _isPreviewVisible, value);
     }
 
+    // ─── 预览 / 分析两级控制 ───
+    // 采集进程先只做预览，收到 "start" 才加载模型并开始录制/分析，
+    // 收到 "stop" 停止并出结果。状态以进程回报的 [CONTROL] 标记为准。
+    private Action<string>? _sendControl;
+    private bool _isAnalyzing;
+
+    /// <summary>采集进程已进入分析（录制 + 实时检测）阶段。</summary>
+    public bool IsAnalyzing
+    {
+        get => _isAnalyzing;
+        private set
+        {
+            if (!SetProperty(ref _isAnalyzing, value)) return;
+            OnPropertyChanged(nameof(IsPreviewing));
+            ((RelayCommand)StartAnalysisCommand).CanExecute(null);
+            ((RelayCommand)StopAnalysisCommand).CanExecute(null);
+        }
+    }
+
+    /// <summary>任务已启动但还没开始分析：此刻处于预览，等用户确认画面。</summary>
+    public bool IsPreviewing => IsRunning && !IsAnalyzing;
+
+    private void OnStartAnalysis()
+    {
+        if (_sendControl == null) return;
+        _mainVm.AddLog("info", "已请求开始分析，正在加载检测模型...");
+        // 先乐观切换按钮；进程确认（analyzing=1）或拒绝时会纠正回来
+        IsAnalyzing = true;
+        _sendControl("start");
+    }
+
+    private void OnStopAnalysis()
+    {
+        if (_sendControl == null) return;
+        _mainVm.AddLog("info", "已请求停止分析，正在收尾...");
+        _sendControl("stop");
+    }
+
+    /// <summary>
+    /// 消费采集进程回报的控制标记。返回 true 表示这行只是内部控制协议，
+    /// 不必写进用户日志。
+    /// </summary>
+    private bool HandleControlMessage(string message)
+    {
+        if (message.Contains("暂时无法开始分析", StringComparison.Ordinal))
+        {
+            // 某一路还没画面，进程仍停在预览；把按钮切回「开始分析」
+            IsAnalyzing = false;
+            return false;
+        }
+        if (message.Contains("[CONTROL] analyzing=1", StringComparison.Ordinal))
+        {
+            IsAnalyzing = true;
+            return true;
+        }
+        if (message.Contains("[CONTROL] analyzing=0", StringComparison.Ordinal))
+        {
+            IsAnalyzing = false;
+            return true;
+        }
+        return false;
+    }
+
     private DispatcherTimer? _previewTimer;
+    // 记录上一次已解码的预览文件时间戳：Python 端约 20fps 发布新帧，
+    // 定时器（50ms）触发时若文件没变就跳过解码，避免重复解码同一张图。
+    private DateTime _previewStampLeft = DateTime.MinValue;
+    private DateTime _previewStampRight = DateTime.MinValue;
 
     private string PreviewDirectory =>
         Path.Combine(_pythonEngine.WorkspaceDir, "output", "live_preview");
+
+    /// <summary>预览帧目录。Web 界面把这一层映射成虚拟主机直接取图，不必逐帧转码。</summary>
+    public string LivePreviewDirectory => PreviewDirectory;
 
     /// <summary>启动定时刷新预览：约 20fps 读取 Python 写的最新 JPEG。</summary>
     private void StartLivePreview()
     {
         if (_previewTimer != null) return;
+        _previewStampLeft = DateTime.MinValue;
+        _previewStampRight = DateTime.MinValue;
         _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _previewTimer.Tick += (_, _) => RefreshLivePreview();
         _previewTimer.Start();
         IsPreviewVisible = true;
+        RefreshLivePreview();
     }
 
     private void StopLivePreview()
@@ -185,6 +264,8 @@ public class PipelineViewModel : ViewModelBase
         _previewTimer?.Stop();
         _previewTimer = null;
         IsPreviewVisible = false;
+        _previewStampLeft = DateTime.MinValue;
+        _previewStampRight = DateTime.MinValue;
         LivePreviewLeft = null;
         LivePreviewRight = null;
     }
@@ -200,7 +281,19 @@ public class PipelineViewModel : ViewModelBase
         var path = Path.Combine(PreviewDirectory, $"live_preview_{side}.jpg");
         try
         {
-            if (!File.Exists(path)) return;
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length == 0) return;
+
+            var stamp = info.LastWriteTimeUtc;
+            if (side == "left")
+            {
+                if (stamp == _previewStampLeft) return;
+            }
+            else if (stamp == _previewStampRight)
+            {
+                return;
+            }
+
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             if (stream.Length == 0) return;
             var bmp = new BitmapImage();
@@ -209,8 +302,16 @@ public class PipelineViewModel : ViewModelBase
             bmp.StreamSource = stream;
             bmp.EndInit();
             bmp.Freeze(); // 供跨线程 UI 使用
-            if (side == "left") LivePreviewLeft = bmp;
-            else LivePreviewRight = bmp;
+            if (side == "left")
+            {
+                _previewStampLeft = stamp;
+                LivePreviewLeft = bmp;
+            }
+            else
+            {
+                _previewStampRight = stamp;
+                LivePreviewRight = bmp;
+            }
         }
         catch
         {
@@ -228,7 +329,7 @@ public class PipelineViewModel : ViewModelBase
         set => SetProperty(ref _processingProgress, value);
     }
 
-    private string _processingProgressText = "等待开始";
+    private string _processingProgressText = "待启动";
     public string ProcessingProgressText
     {
         get => _processingProgressText;
@@ -242,9 +343,12 @@ public class PipelineViewModel : ViewModelBase
         set
         {
             SetProperty(ref _isRunning, value);
+            OnPropertyChanged(nameof(IsPreviewing));
             ((RelayCommand)RunOfflineCommand).CanExecute(null);
             ((RelayCommand)RunOnlineCommand).CanExecute(null);
             ((RelayCommand)CancelCommand).CanExecute(null);
+            ((RelayCommand)StartAnalysisCommand).CanExecute(null);
+            ((RelayCommand)StopAnalysisCommand).CanExecute(null);
         }
     }
 
@@ -264,6 +368,8 @@ public class PipelineViewModel : ViewModelBase
     public RelayCommand DetectCamerasCommand { get; }
     public RelayCommand TestNetworkCommand { get; }
     public RelayCommand CancelCommand { get; }
+    public RelayCommand StartAnalysisCommand { get; }
+    public RelayCommand StopAnalysisCommand { get; }
 
     private CancellationTokenSource? _cts;
 
@@ -273,6 +379,13 @@ public class PipelineViewModel : ViewModelBase
     private int _stageSpan = 100;
     private string _stageDescription = "";
     private int _currentSampleIndex;
+
+    // 日志 → 结构化进度的解析器。每次开始处理都按本批样本重建，
+    // 否则上一轮记住的"已完成"会让这一轮的进度条一开局就是满的。
+    private PipelineProgressParser? _progressParser;
+
+    private PipelineProgressParser ProgressParser =>
+        _progressParser ??= new PipelineProgressParser(_processingSamples);
 
     private async Task RunOfflineAsync()
     {
@@ -300,7 +413,7 @@ public class PipelineViewModel : ViewModelBase
         _cts = new CancellationTokenSource();
         InitSteps(targetSamples);
         ProcessingProgress = 0;
-        ProcessingProgressText = "等待 Python 任务启动";
+        ProcessingProgressText = "等待推理任务启动";
         _mainVm.SetPipelineState(
             !SkipReconstruct ? 2 : !SkipBallistic ? 3 : 4,
             !SkipReconstruct ? "准备三维重建" : !SkipBallistic ? "准备弹道拟合" : "准备 Unity 导出");
@@ -310,8 +423,7 @@ public class PipelineViewModel : ViewModelBase
         var progress = new Progress<(string Message, string Level)>(p =>
         {
             _mainVm.AddLog(p.Level, p.Message);
-            UpdateProcessingProgress(p.Message);
-            UpdateStepStatusFromLog(p.Message);
+            HandleLogLine(p.Message);
         });
 
         bool success = false;
@@ -325,7 +437,7 @@ public class PipelineViewModel : ViewModelBase
             if (success)
             {
                 ProcessingProgress = 100;
-                ProcessingProgressText = "全部完成";
+                ProcessingProgressText = "已完成";
                 _mainVm.SetPipelineState(5, "处理完成");
             }
             else
@@ -389,41 +501,47 @@ public class PipelineViewModel : ViewModelBase
 
         var progress = new Progress<(string Message, string Level)>(p =>
         {
+            // [CONTROL] 是进程与界面之间的控制协议，不进用户日志
+            if (HandleControlMessage(p.Message)) return;
             _mainVm.AddLog(p.Level, p.Message);
-            UpdateProcessingProgress(p.Message);
-            UpdateStepStatusFromLog(p.Message);
+            HandleLogLine(p.Message);
         });
         try
         {
             var success = IsLiveAnalysis
                 ? await _pipelineService.RunOnlineLiveAsync(
-                    camLeft, camRight, SampleName, progress, _cts.Token)
+                    camLeft, camRight, SampleName, progress, _cts.Token,
+                    sink => _sendControl = sink)
                 : await _pipelineService.RunOnlineAsync(
-                    camLeft, camRight, SampleName, progress, _cts.Token);
+                    camLeft, camRight, SampleName, progress, _cts.Token,
+                    sink => _sendControl = sink);
 
             CompleteRemainingSteps(success);
             if (success)
             {
                 ProcessingProgress = 100;
-                ProcessingProgressText = "录制与处理完成";
-                _mainVm.SetPipelineState(5, "录制与处理完成");
+                ProcessingProgressText = "录制与处理已完成";
+                _mainVm.SetPipelineState(5, "录制与处理已完成");
             }
             else
                 _mainVm.SetPipelineState(-1, "录制或处理失败");
             _mainVm.AddLog(success ? "success" : "error",
-                success ? "录制与处理完成" : "录制或处理失败");
+                success ? "录制与处理已完成" : "录制或处理失败");
             await _mainVm.RefreshListsAsync();
         }
         catch (Exception ex)
         {
             CompleteRemainingSteps(false);
-            ProcessingProgressText = "任务异常，详情已写入日志文件";
+            ProcessingProgressText = "任务异常，详情见日志";
             _mainVm.SetPipelineState(-1, "任务异常");
             _mainVm.AddLog("error", "在线任务异常: " + ex.Message);
         }
         finally
         {
             StopLivePreview();
+            // 进程已经退出，指令通道随之失效
+            _sendControl = null;
+            IsAnalyzing = false;
             IsRunning = false;
             _cts?.Dispose();
             _cts = null;
@@ -441,10 +559,11 @@ public class PipelineViewModel : ViewModelBase
 
     private async Task TestNetworkAsync()
     {
-        var url = IsNetworkMode ? UrlLeft?.Trim() ?? "" : "";
-        if (string.IsNullOrEmpty(url))
+        var leftUrl = IsNetworkMode ? UrlLeft?.Trim() ?? "" : "";
+        var rightUrl = IsNetworkMode ? UrlRight?.Trim() ?? "" : "";
+        if (string.IsNullOrEmpty(leftUrl) || string.IsNullOrEmpty(rightUrl))
         {
-            NetworkTestText = "请先填写要测试的网络流地址";
+            NetworkTestText = "请先填写左右两个网络流地址";
             return;
         }
 
@@ -452,8 +571,10 @@ public class PipelineViewModel : ViewModelBase
         NetworkTestText = "正在连接测试...";
         try
         {
-            var (ok, message) = await _pipelineService.TestNetworkStreamAsync(url);
-            NetworkTestText = ok ? $"✅ {message}" : $"❌ {message}";
+            var (leftOk, leftMessage) = await _pipelineService.TestNetworkStreamAsync(leftUrl);
+            var (rightOk, rightMessage) = await _pipelineService.TestNetworkStreamAsync(rightUrl);
+            NetworkTestText = $"左路 {(leftOk ? "✅" : "❌")} {leftMessage}\n" +
+                              $"右路 {(rightOk ? "✅" : "❌")} {rightMessage}";
         }
         catch (Exception ex)
         {
@@ -479,6 +600,7 @@ public class PipelineViewModel : ViewModelBase
         _stageSpan = 100;
         _stageDescription = "";
         _currentSampleIndex = 0;
+        _progressParser = null;
 
         Steps.Clear();
         foreach (var name in samples)
@@ -491,60 +613,80 @@ public class PipelineViewModel : ViewModelBase
         }
     }
 
-    private void UpdateStepStatusFromLog(string message)
+    /// <summary>
+    /// 一行引擎日志 → 进度条 + 步骤列表。
+    /// 认日志的活儿交给 <see cref="PipelineProgressParser"/>（Core 里有单测），
+    /// 这里只负责把它给出的阶段/样本/阶段内位置换算成界面数值。
+    /// </summary>
+    private void HandleLogLine(string message)
     {
         if (string.IsNullOrWhiteSpace(message))
             return;
 
-        if (message.Contains("[1/3]", StringComparison.Ordinal))
-        {
-            BeginStage("3D 重建");
-            return;
-        }
-
-        if (message.Contains("[2/3]", StringComparison.Ordinal))
-        {
-            EndStage();
-            BeginStage("弹道拟合");
-            return;
-        }
-
-        if (message.Contains("[3/3]", StringComparison.Ordinal))
-        {
-            EndStage();
-            BeginStage("Unity 导出");
-            return;
-        }
-
-        // 样本名 [sampleX] → 推进该样本在当前阶段的步骤
-        var sampleMatch = Regex.Match(message, @"^\[(.+?)\]");
-        if (sampleMatch.Success)
-        {
-            int idx = _processingSamples.IndexOf(sampleMatch.Groups[1].Value);
-            if (idx >= 0 && !string.IsNullOrEmpty(_stageDescription))
-                MarkSampleStep(idx);
-            return;
-        }
-
+        // 解析器只认正常流程，异常行自己判
         if (message.Contains("失败", StringComparison.Ordinal)
             || message.Contains("Traceback", StringComparison.Ordinal))
         {
             FinishRunningStep(StepStatus.Failed);
         }
-    }
 
-    private void BeginStage(string description)
-    {
-        _stageDescription = description;
-        for (var i = 0; i < Steps.Count; i++)
+        var progress = ProgressParser.Consume(message);
+        if (progress is null)
+            return;
+
+        if (progress.Stage == PipelineStage.Done)
         {
-            if (Steps[i].Description == description && Steps[i].Status == StepStatus.Pending)
+            ProcessingProgress = 100;
+            ProcessingProgressText = "已完成";
+            return;
+        }
+
+        var title = StageTitle(progress.Stage);
+        if (title is null)
+            return;
+
+        if (title != _stageDescription)
+            EnterStage(progress.Stage, title);
+
+        if (progress.SampleName is { } sample)
+        {
+            var index = _processingSamples.IndexOf(sample);
+            if (index >= 0)
             {
-                Steps[i] = Steps[i] with { Status = StepStatus.Running };
-                return;
+                _currentSampleIndex = index;
+                MarkSampleStep(index);
             }
         }
+
+        var count = Math.Max(1, _processingSamples.Count);
+        var sampleIndex = Math.Clamp(_currentSampleIndex, 0, count - 1);
+        // 完成事件算整格，进行中则用样本内百分比（重建阶段才有）细粒度内插
+        var position = progress.State == StageState.Completed
+            ? sampleIndex + 1.0
+            : sampleIndex + (progress.SampleFraction ?? 0);
+
+        ProcessingProgress = Math.Clamp(
+            _stageBase + (int)Math.Round(position / count * _stageSpan), 0, 100);
+        ProcessingProgressText = progress.Message;
     }
+
+    /// <summary>阶段名 → 进度基线 / 跨度 / 提示语，集中一处，避免散落的魔数。</summary>
+    private static (int Base, int Span, string Text) StageLayout(PipelineStage stage) => stage switch
+    {
+        PipelineStage.Reconstruct => (0, 60, "三维重建中..."),
+        PipelineStage.Ballistic => (60, 25, "弹道拟合中..."),
+        PipelineStage.Export => (85, 15, "Unity 导出中..."),
+        _ => (0, 100, "处理中..."),
+    };
+
+    /// <summary>阶段名与步骤列表里的 Description 保持一致，MarkSampleStep 靠它配对。</summary>
+    private static string? StageTitle(PipelineStage stage) => stage switch
+    {
+        PipelineStage.Reconstruct => "3D 重建",
+        PipelineStage.Ballistic => "弹道拟合",
+        PipelineStage.Export => "Unity 导出",
+        _ => null,
+    };
 
     private void EndStage()
     {
@@ -585,69 +727,35 @@ public class PipelineViewModel : ViewModelBase
         }
     }
 
-    private void UpdateProcessingProgress(string message)
+    private void EnterStage(PipelineStage stage, string title)
     {
-        if (string.IsNullOrWhiteSpace(message))
-            return;
+        EndStage();
 
-        if (message.Contains("[1/3]", StringComparison.Ordinal)) { EnterStage("3D 重建", 0, 60, "三维重建中..."); return; }
-        if (message.Contains("[2/3]", StringComparison.Ordinal)) { EnterStage("弹道拟合", 60, 25, "弹道拟合中..."); return; }
-        if (message.Contains("[3/3]", StringComparison.Ordinal)) { EnterStage("Unity 导出", 85, 15, "Unity 导出中..."); return; }
-        if (message.Contains("全部完成", StringComparison.Ordinal)) { ProcessingProgress = 100; ProcessingProgressText = "全部完成"; return; }
+        var layout = StageLayout(stage);
+        _stageDescription = title;
+        _stageBase = layout.Base;
+        _stageSpan = layout.Span;
+        _currentSampleIndex = 0;
+        ProcessingProgress = layout.Base;
+        ProcessingProgressText = layout.Text;
 
-        var sampleMatch = Regex.Match(message, @"^\[(.+?)\]");
-        if (sampleMatch.Success)
+        // 该阶段第一个样本置为进行中，其余保持等待
+        for (var index = 0; index < Steps.Count; index++)
         {
-            int idx = _processingSamples.IndexOf(sampleMatch.Groups[1].Value);
-            if (idx >= 0)
+            if (Steps[index].Description == title && Steps[index].Status == StepStatus.Pending)
             {
-                _currentSampleIndex = idx;
-                // 拟合/导出阶段没有百分比输出，用样本序号推进进度
-                int n = Math.Max(1, _processingSamples.Count);
-                if (_stageDescription == "弹道拟合" || _stageDescription == "Unity 导出")
-                {
-                    ProcessingProgress = Math.Clamp(
-                        _stageBase + (int)Math.Round((idx + 1.0) / n * _stageSpan), 0, 100);
-                }
+                Steps[index] = Steps[index] with { Status = StepStatus.Running };
+                break;
             }
         }
 
-        var m = Regex.Match(message, @"\((\d{1,3})%\)");
-        if (!m.Success || !int.TryParse(m.Groups[1].Value, out int percent))
-            return;
-
-        int count = Math.Max(1, _processingSamples.Count);
-        int sampleIdx = Math.Clamp(_currentSampleIndex, 0, count - 1);
-
-        // 重建阶段：起脚定位约占样本内 20%，密集跟踪约占 80%，避免两段各自 0-100% 导致进度回退
-        double sampleFraction;
-        if (message.Contains("起脚定位", StringComparison.Ordinal))
-            sampleFraction = percent / 100.0 * 0.2;
-        else if (message.Contains("密集跟踪", StringComparison.Ordinal))
-            sampleFraction = 0.2 + percent / 100.0 * 0.8;
-        else
-            sampleFraction = percent / 100.0;
-
-        ProcessingProgress = Math.Clamp(
-            _stageBase + (int)Math.Round((sampleIdx + sampleFraction) / count * _stageSpan), 0, 100);
-        ProcessingProgressText = message.Trim();
-    }
-
-    private void EnterStage(string description, int basePercent, int span, string text)
-    {
-        _stageDescription = description;
-        _stageBase = basePercent;
-        _stageSpan = span;
-        _currentSampleIndex = 0;
-        ProcessingProgress = basePercent;
-        ProcessingProgressText = text;
-        _mainVm.SetPipelineState(description switch
+        _mainVm.SetPipelineState(stage switch
         {
-            "3D 重建" => 2,
-            "弹道拟合" => 3,
-            "Unity 导出" => 4,
-            _ => 0
-        }, text);
+            PipelineStage.Reconstruct => 2,
+            PipelineStage.Ballistic => 3,
+            PipelineStage.Export => 4,
+            _ => 0,
+        }, layout.Text);
     }
 
     private void FinishRunningStep(StepStatus status)

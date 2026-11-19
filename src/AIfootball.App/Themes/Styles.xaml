@@ -92,6 +92,45 @@
         <Setter Property="Background" Value="{StaticResource DangerBrush}"/>
     </Style>
 
+    <!-- 分段控件外壳：容纳一组互斥选项（如回放速度档位） -->
+    <Style x:Key="SegmentedHost" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource SurfaceAltBrush}"/>
+        <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="Padding" Value="2"/>
+    </Style>
+
+    <!-- 分段控件中的单个选项：选中态用底色+主色字，一眼能看出当前档位 -->
+    <Style x:Key="SegmentItem" TargetType="ToggleButton">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="Padding" Value="8,3"/>
+        <Setter Property="MinWidth" Value="34"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border Background="{TemplateBinding Background}" CornerRadius="4"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Background" Value="{StaticResource SurfaceBrush}"/>
+                            <Setter Property="Foreground" Value="{StaticResource PrimaryBrush}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- 图标按钮 -->
     <Style x:Key="IconButton" TargetType="Button">
         <Setter Property="Background" Value="Transparent"/>
@@ -326,7 +365,7 @@
     <!-- ============== 标题栏按钮样式 ============== -->
     <Style x:Key="TitleBarButton" TargetType="Button">
         <Setter Property="Background" Value="Transparent"/>
-        <Setter Property="Foreground" Value="#F3F6F8"/>
+        <Setter Property="Foreground" Value="#475569"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Width" Value="46"/>
         <Setter Property="Height" Value="48"/>
@@ -341,7 +380,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter Property="Background" Value="{StaticResource ChromeElevatedBrush}"/>
+                            <Setter Property="Background" Value="#F1F5F9"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -351,7 +390,7 @@
 
     <Style x:Key="TitleBarCloseButton" TargetType="Button"
            BasedOn="{StaticResource TitleBarButton}">
-        <Setter Property="Foreground" Value="#F3F6F8"/>
+        <Setter Property="Foreground" Value="#475569"/>
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
                 <Setter Property="Background" Value="#C42B1C"/>
