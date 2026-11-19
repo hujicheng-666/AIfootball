@@ -15,7 +15,6 @@
 
 # --- Unity 构建产物与编辑器缓存（可重新生成，不入库）---
 /_build_demo/
-/runtime/
 /Myproject/Library/
 /Myproject/Temp/
 /Myproject/Logs/
@@ -26,6 +25,15 @@
 /Myproject/.tmp_synth/
 /Myproject/.agents/
 *.unitypackage
+
+# --- Unity 播放器 runtime/ 随仓库分发 ---
+# 原因：dotnet build 只产出 WPF 的 exe，Unity 播放器需 Unity 2021.3.45f2c1
+# 重新出包才能得到；为了保证「clone + 编译」即可运行，播放器必须入库。
+# 下面只排除每次运行都会改写的桥接文件与历史记录，不排除可执行本体。
+/runtime/_backup_oldplayer/
+/runtime/data/PenaltyKickHistory/
+/runtime/data/wpf-*.txt
+/runtime/data/*.log
 
 # --- Python 字节码缓存（解释器本体入库，缓存不入库）---
 __pycache__/
@@ -40,9 +48,13 @@ src/AIfootball.Web/dist/
 src/AIfootball.Web/.vite/
 
 # --- 运行期数据与本地输出 ---
-/data/
+# 注意：data/ 与 calib/ 下有一部分是「跑起来必需」的输入，
+# 不能整目录忽略，否则 clone 后检测链路直接不可用。只排除可再生成的大数据集。
+/data/external/
+/data/goal_detect/
+/data/samples/
+/data/calib/
 /logs/
-/calib/
 /output/*
 !/output/blender/
 /output/blender/*.blend1

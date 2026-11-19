@@ -1,0 +1,32 @@
+{
+  "id": "GK_Reactive",
+  "DisplayName": "反应型门将",
+  "Description": "反应极快，低球无敌，但高空球是弱点。",
+  "Height": 1.82,
+  "DiveSpeed": 5.5,
+  "JumpDistance": 1.1,
+  "JumpHeight": 0.4,
+  "Reach": 0.45,
+  "TendGoalSpeed": 3.8,
+  "TendGoalDistance": 2.5,
+  "GoalKeeping": 0.88,
+  "SidePreference": 0.0,
+  "HeightPreference": -0.5,
+  "ProbabilityMap": {
+    "LowLeft": 0.9,
+    "LowMidLeft": 0.93,
+    "LowCenter": 0.95,
+    "LowMidRight": 0.93,
+    "LowRight": 0.9,
+    "MidLeft": 0.85,
+    "MidMidLeft": 0.88,
+    "MidCenter": 0.92,
+    "MidMidRight": 0.88,
+    "MidRight": 0.85,
+    "HighLeft": 0.5,
+    "HighMidLeft": 0.55,
+    "HighCenter": 0.6,
+    "HighMidRight": 0.55,
+    "HighRight": 0.5
+  }
+}

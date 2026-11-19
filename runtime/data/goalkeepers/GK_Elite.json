@@ -1,0 +1,32 @@
+{
+  "id": "GK_Elite",
+  "DisplayName": "世界级门将",
+  "Description": "全方位无死角，扑救成功率极高。",
+  "Height": 1.95,
+  "DiveSpeed": 5.0,
+  "JumpDistance": 1.2,
+  "JumpHeight": 0.7,
+  "Reach": 0.6,
+  "TendGoalSpeed": 3.5,
+  "TendGoalDistance": 2.8,
+  "GoalKeeping": 0.93,
+  "SidePreference": 0.0,
+  "HeightPreference": 0.0,
+  "ProbabilityMap": {
+    "LowLeft": 0.94,
+    "LowMidLeft": 0.95,
+    "LowCenter": 0.97,
+    "LowMidRight": 0.95,
+    "LowRight": 0.94,
+    "MidLeft": 0.9,
+    "MidMidLeft": 0.92,
+    "MidCenter": 0.95,
+    "MidMidRight": 0.92,
+    "MidRight": 0.9,
+    "HighLeft": 0.78,
+    "HighMidLeft": 0.82,
+    "HighCenter": 0.88,
+    "HighMidRight": 0.82,
+    "HighRight": 0.78
+  }
+}

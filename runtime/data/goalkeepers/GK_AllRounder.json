@@ -1,0 +1,32 @@
+{
+  "id": "GK_AllRounder",
+  "DisplayName": "均衡型门将",
+  "Description": "各项能力均衡，没有明显短板。",
+  "Height": 1.88,
+  "DiveSpeed": 4.0,
+  "JumpDistance": 1.0,
+  "JumpHeight": 0.5,
+  "Reach": 0.5,
+  "TendGoalSpeed": 3.0,
+  "TendGoalDistance": 3.0,
+  "GoalKeeping": 0.85,
+  "SidePreference": 0.0,
+  "HeightPreference": 0.0,
+  "ProbabilityMap": {
+    "LowLeft": 0.85,
+    "LowMidLeft": 0.88,
+    "LowCenter": 0.92,
+    "LowMidRight": 0.88,
+    "LowRight": 0.85,
+    "MidLeft": 0.8,
+    "MidMidLeft": 0.83,
+    "MidCenter": 0.88,
+    "MidMidRight": 0.83,
+    "MidRight": 0.8,
+    "HighLeft": 0.6,
+    "HighMidLeft": 0.65,
+    "HighCenter": 0.72,
+    "HighMidRight": 0.65,
+    "HighRight": 0.6
+  }
+}

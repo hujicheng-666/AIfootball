@@ -1,0 +1,32 @@
+{
+  "id": "GK_WeakLowRight",
+  "DisplayName": "右下盲区型",
+  "Description": "整体不错，但右下角是致命弱点。",
+  "Height": 1.9,
+  "DiveSpeed": 4.2,
+  "JumpDistance": 1.05,
+  "JumpHeight": 0.55,
+  "Reach": 0.5,
+  "TendGoalSpeed": 3.2,
+  "TendGoalDistance": 3.0,
+  "GoalKeeping": 0.82,
+  "SidePreference": -0.3,
+  "HeightPreference": -0.2,
+  "ProbabilityMap": {
+    "LowLeft": 0.82,
+    "LowMidLeft": 0.78,
+    "LowCenter": 0.85,
+    "LowMidRight": 0.5,
+    "LowRight": 0.3,
+    "MidLeft": 0.75,
+    "MidMidLeft": 0.8,
+    "MidCenter": 0.83,
+    "MidMidRight": 0.7,
+    "MidRight": 0.55,
+    "HighLeft": 0.55,
+    "HighMidLeft": 0.6,
+    "HighCenter": 0.65,
+    "HighMidRight": 0.5,
+    "HighRight": 0.4
+  }
+}
