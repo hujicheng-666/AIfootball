@@ -5,9 +5,19 @@
 #        大二进制由 Git LFS 管理（见 .gitattributes）。
 # ============================================================
 
-# --- .NET 编译产物（可重新编译产生，不入库）---
-[Bb]in/
-[Oo]bj/
+# --- .NET 编译产物（按工程目录限定）---
+# 注意不要写成全局 [Bb]in/：python_env 里的第三方包自带的 bin/ 目录
+# （如 decompyle3/bin/）是运行时代码，误忽略会导致依赖残缺。
+/src/**/bin/
+/src/**/obj/
+/tests/**/bin/
+/tests/**/obj/
+/tools/**/bin/
+/tools/**/obj/
+/mobile-camera-bridge/**/bin/
+/mobile-camera-bridge/**/obj/
+/bin/
+/obj/
 *.user
 *.suo
 *.sln.docstates
@@ -36,15 +46,24 @@
 /runtime/data/*.log
 
 # --- Python 字节码缓存（解释器本体入库，缓存不入库）---
+# 绝对不要写 *.py[cod]：那会把 *.pyd（Windows 下的 C 扩展，如 cv2.pyd / torch 的
+# _C.pyd）一起忽略掉。python_env 必须包含 .pyd，否则 clone 后 import cv2 直接失败。
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
 *.egg-info/
 *.egg
 .pytest_cache/
 
+# 32 位 polars 运行时：64 位解释器永远不会加载它，且单个 _polars_runtime.pyd 占 176MB。
+# 项目代码未 import polars（仅被某个依赖连带装进来），排除不影响运行。
+python_env/Lib/site-packages/_polars_runtime_32/
+
 # --- 前端依赖与构建输出 ---
+# node_modules 不入库；dist 必须入库：WPF 主界面是 WebView2 加载 dist 的产物，
+# clone 后若没有 dist，进程会弹「找不到界面资源目录，请先执行 npm run build」。
+# 改动 src/AIfootball.Web 源码后，需重新 npm run build 并提交 dist。
 src/AIfootball.Web/node_modules/
-src/AIfootball.Web/dist/
 src/AIfootball.Web/.vite/
 
 # --- 运行期数据与本地输出 ---
@@ -61,7 +80,7 @@ src/AIfootball.Web/.vite/
 /output/blender/preview*/
 
 # --- 打包/发布产物 ---
-dist/
+/dist/
 *.msix
 *.msixbundle
 .build-check/

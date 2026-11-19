@@ -19,20 +19,55 @@ Windows 桌面应用：左右双目视频 → YOLO11 检测 → 三维三角化 
 
 ## 快速开始
 
-要求：Windows 10/11 x64、.NET 8 SDK。
+要求：Windows 10/11 x64、.NET 8 SDK。**不需要**另装 Python、PyTorch、YOLO 或 Unity——
+运行环境与 Unity 播放器都已随仓库分发。
+
+### 1. 克隆（必须带 LFS）
+
+```powershell
+git lfs install          # 只需一次
+git clone https://github.com/hujicheng-666/AIfootball.git
+cd AIfootball
+```
+
+仓库含 `python_env\`（内嵌 Python + torch + ultralytics，约 1.6GB）与 `runtime\`
+（Unity 播放器，约 486MB），都走 Git LFS。**没有 `git lfs` 会拿到一堆指针文件，
+启动时会报找不到 `python_env\python.exe`。**
+
+### 2. 编译
 
 ```powershell
 dotnet build src\AIfootball.sln -c Release   # 只构建 WPF App（单体版）
 ```
 
-构建后运行（路径随上面的命令而定，注意**没有** `x64` 这一段）：
+### 3. 运行
 
 ```text
 src\AIfootball.App\bin\Release\net8.0-windows10.0.19041.0\win-x64\AIfootball.exe
 ```
 
-> 若用 `-p:Platform=x64` 构建，产物会落在 `bin\x64\Release\...`。两个目录会同时存在，
-> 混用很容易启动到旧的一份——改完代码后按构建时间确认一下 exe 的时间戳。
+> 路径注意**没有** `x64` 这一段。若用 `-p:Platform=x64` 构建，产物会落在
+> `bin\x64\Release\...`。两个目录会同时存在，混用很容易启动到旧的一份——
+> 改完代码后按构建时间确认一下 exe 的时间戳。
+
+首次启动会自动定位工作区根目录（从 exe 向上找 `python_env\`），无需配置。
+`runtime\` 里的 Unity 播放器由 WPF 拉起，用于三维回放；它不能由 `dotnet build`
+生成，所以必须来自仓库（见 `runtime\`）。
+
+### 目录角色
+
+| 目录 | 是否入库 | 说明 |
+| --- | --- | --- |
+| `python_env\` | 是（LFS） | 内嵌 Python 3.10 + torch/cv2/ultralytics，开箱即用 |
+| `runtime\` | 是（LFS） | Unity 播放器（`Myproject.exe` + `Myproject_Data`），`dotnet build` 不生成 |
+| `calib\` | 是 | 双目标定四件套，检测链路必需；换场地需重新标定 |
+| `data\goalkeepers\` | 是 | 门将属性 JSON，UI 列表与 `evaluate` 依赖 |
+| `models\` | 是 | `yolo11m.pt` / `yolo11n.pt` |
+| `samples\` | 是 | sample1/2/3 双目演示视频 |
+| `Myproject\` | 是 | Unity 工程（`Assets` / `ProjectSettings` / `Packages`），改模型用 |
+| `data\external\`、`data\goal_detect\` | 否 | 外部数据集与 YOLO 训练集，体积大，按需自备 |
+| `data\PenaltyKickHistory\`、`output\`（除 `blender`） | 否 | 运行期产物 |
+
 
 ## 自检与测试
 
