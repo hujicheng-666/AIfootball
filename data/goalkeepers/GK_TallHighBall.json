@@ -1,0 +1,31 @@
+{
+    "DisplayName":  "Tall High-Ball Keeper",
+    "Description":  "Long reach and strong jump against chips and top-corner shots, slower low corners.",
+    "Height":  2.02,
+    "DiveSpeed":  3.55,
+    "JumpDistance":  1.06,
+    "JumpHeight":  0.92,
+    "Reach":  0.88,
+    "TendGoalSpeed":  2.95,
+    "TendGoalDistance":  2,
+    "GoalKeeping":  0.82,
+    "SidePreference":  0,
+    "HeightPreference":  0.72,
+    "ProbabilityMap":  {
+                           "LowLeft":  0.42,
+                           "LowMidLeft":  0.5,
+                           "LowCenter":  0.68,
+                           "LowMidRight":  0.5,
+                           "LowRight":  0.42,
+                           "MidLeft":  0.52,
+                           "MidMidLeft":  0.62,
+                           "MidCenter":  0.78,
+                           "MidMidRight":  0.62,
+                           "MidRight":  0.52,
+                           "HighLeft":  0.78,
+                           "HighMidLeft":  0.86,
+                           "HighCenter":  0.92,
+                           "HighMidRight":  0.86,
+                           "HighRight":  0.78
+                       }
+}

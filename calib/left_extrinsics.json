@@ -1,0 +1,304 @@
+{
+  "image_path": "D:\\Users\\32272\\Desktop\\IMG_20260314_222612.jpg",
+  "view_type": "shooter_left",
+  "output_prefix": "left",
+  "intrinsics_profile": "intrinsics_left",
+  "intrinsics_path": "D:\\AIfootball\\calib\\intrinsics_left.npz",
+  "intrinsics_image_size": [
+    2448,
+    1080
+  ],
+  "working_image_size": [
+    3264,
+    1440
+  ],
+  "solver_name": "solvePnPRansac(EPNP) + robust all-points refine + leave-one-out outlier rejection + joint stereo bundle adjustment",
+  "rvec": [
+    0.6338046286569479,
+    1.9657587608275082,
+    -1.808183856440993
+  ],
+  "tvec": [
+    -3.5186929035119388,
+    -0.1898425078249944,
+    16.977354442555164
+  ],
+  "rotation_matrix": [
+    [
+      -0.8199298604256641,
+      0.5722457035337079,
+      -0.015807554192940942
+    ],
+    [
+      0.06345576884502813,
+      0.06340887835551257,
+      -0.9959682121162214
+    ],
+    [
+      -0.5689361909587378,
+      -0.8176271576537242,
+      -0.08830312386577843
+    ]
+  ],
+  "camera_center_world": [
+    6.785996590139925,
+    15.90674065392084,
+    1.2544544003914713
+  ],
+  "camera_matrix": [
+    [
+      2837.817627966532,
+      0.0,
+      1584.8584336755293
+    ],
+    [
+      0.0,
+      2855.440252480611,
+      693.1824356207864
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "dist_coeffs": [
+    0.2142014292149403,
+    -1.9713714340234154,
+    -0.004249469566892207,
+    -0.011688431680926505,
+    0.0
+  ],
+  "mean_reprojection_error": 5.696298445879265,
+  "max_reprojection_error": 10.609102315973239,
+  "mean_all_point_reprojection_error": 11.127208202565788,
+  "max_all_point_reprojection_error": 38.281756985998406,
+  "inliers": [
+    0,
+    1,
+    3,
+    4,
+    5
+  ],
+  "swapped_left_right": false,
+  "points": [
+    {
+      "name": "left_post_bottom",
+      "label": "left post base (射门视角)",
+      "world": [
+        3.66,
+        0.0,
+        0.0
+      ],
+      "image": [
+        352.0,
+        699.0
+      ],
+      "projected": [
+        362.60749385985355,
+        698.8152678588929
+      ],
+      "error": 10.609102315973239,
+      "is_inlier": true
+    },
+    {
+      "name": "right_post_bottom",
+      "label": "right post base (射门视角)",
+      "world": [
+        -3.66,
+        0.0,
+        0.0
+      ],
+      "image": [
+        1512.0,
+        626.0
+      ],
+      "projected": [
+        1507.645761970132,
+        629.8631356582132
+      ],
+      "error": 5.8209282708607955,
+      "is_inlier": true
+    },
+    {
+      "name": "left_post_top",
+      "label": "left post top (射门视角)",
+      "world": [
+        3.66,
+        0.0,
+        2.44
+      ],
+      "image": [
+        326.0,
+        229.0
+      ],
+      "projected": [
+        360.87662489298964,
+        244.78334419597866
+      ],
+      "error": 38.281756985998406,
+      "is_inlier": false
+    },
+    {
+      "name": "right_post_top",
+      "label": "right post top (射门视角)",
+      "world": [
+        -3.66,
+        0.0,
+        2.44
+      ],
+      "image": [
+        1504.0,
+        265.0
+      ],
+      "projected": [
+        1499.7923816331163,
+        258.1212215615347
+      ],
+      "error": 8.063600010344777,
+      "is_inlier": true
+    },
+    {
+      "name": "penalty_spot",
+      "label": "penalty spot",
+      "world": [
+        0.0,
+        11.0,
+        0.0
+      ],
+      "image": [
+        2555.0,
+        871.0
+      ],
+      "projected": [
+        2554.965080125487,
+        870.9361467991341
+      ],
+      "error": 0.07277794237830912,
+      "is_inlier": true
+    },
+    {
+      "name": "right_goal_area_corner",
+      "label": "right goal-area corner (射门视角)",
+      "world": [
+        -9.16,
+        5.5,
+        0.0
+      ],
+      "image": [
+        2690.0,
+        624.0
+      ],
+      "projected": [
+        2693.818403003907,
+        624.8646842187754
+      ],
+      "error": 3.915083689839199,
+      "is_inlier": true
+    }
+  ],
+  "line_refinement": {
+    "enabled": false,
+    "accepted": false,
+    "reason": "disabled; using manual-point robust PnP only",
+    "detected_line_count": 0,
+    "lines": []
+  },
+  "stereo_bundle_adjustment": {
+    "enabled": true,
+    "accepted": true,
+    "reason": "joint robust reprojection RMS improved without degrading either camera",
+    "loss": "soft_l1 angular reprojection",
+    "world_points_fixed": true,
+    "shared_robust_scale_rad": 0.0011325283397026664,
+    "cameras": {
+      "left": {
+        "initial_mean_reprojection_error_px": 5.88024856878964,
+        "candidate_mean_reprojection_error_px": 5.696298445879265,
+        "initial_max_reprojection_error_px": 16.91412093313964,
+        "candidate_max_reprojection_error_px": 10.609102315973239
+      },
+      "right": {
+        "initial_mean_reprojection_error_px": 5.789085606113349,
+        "candidate_mean_reprojection_error_px": 4.917193393759891,
+        "initial_max_reprojection_error_px": 12.416677094846879,
+        "candidate_max_reprojection_error_px": 11.279139005754407
+      }
+    },
+    "initial_joint_rms_rad": 0.001910078986710803,
+    "candidate_joint_rms_rad": 0.0015918339760409915,
+    "solver_status": 1,
+    "solver_evaluations": 8
+  },
+  "outlier_rejection": {
+    "enabled": true,
+    "accepted": true,
+    "reason": "leave-one-out validation rejected one geometrically inconsistent correspondence",
+    "candidates": [
+      {
+        "excluded_index": 0,
+        "training_mean_error_px": 11.761680981794665,
+        "withheld_prediction_error_px": 11.044921151393577,
+        "withheld_expected_upper_px": 62.06724065976452,
+        "camera_height_m": 1.221328751523317,
+        "accepted": false
+      },
+      {
+        "excluded_index": 1,
+        "training_mean_error_px": 11.03836918061982,
+        "withheld_prediction_error_px": 14.078255195942708,
+        "withheld_expected_upper_px": 55.62265688981807,
+        "camera_height_m": 1.193088461520039,
+        "accepted": false
+      },
+      {
+        "excluded_index": 2,
+        "training_mean_error_px": 5.88024856878964,
+        "withheld_prediction_error_px": 43.70011834438883,
+        "withheld_expected_upper_px": 25.92767199411223,
+        "camera_height_m": 1.2727167902381702,
+        "accepted": true
+      },
+      {
+        "excluded_index": 3,
+        "training_mean_error_px": 9.216890554499992,
+        "withheld_prediction_error_px": 16.43641219846113,
+        "withheld_expected_upper_px": 48.600912744270744,
+        "camera_height_m": 1.245028183115724,
+        "accepted": false
+      },
+      {
+        "excluded_index": 4,
+        "training_mean_error_px": 11.5611456949326,
+        "withheld_prediction_error_px": 148.58309984736286,
+        "withheld_expected_upper_px": 57.07025579647763,
+        "camera_height_m": 1.184593443511839,
+        "accepted": false
+      },
+      {
+        "excluded_index": 5,
+        "training_mean_error_px": 9.343796533165142,
+        "withheld_prediction_error_px": 26.646092181482974,
+        "withheld_expected_upper_px": 42.71415684982111,
+        "camera_height_m": 1.1680034238645427,
+        "accepted": false
+      }
+    ],
+    "excluded_index": 2,
+    "training_inliers": [
+      0,
+      1,
+      3,
+      4,
+      5
+    ],
+    "selected_candidate": {
+      "excluded_index": 2,
+      "training_mean_error_px": 5.88024856878964,
+      "withheld_prediction_error_px": 43.70011834438883,
+      "withheld_expected_upper_px": 25.92767199411223,
+      "camera_height_m": 1.2727167902381702,
+      "accepted": true
+    }
+  }
+}

@@ -1,0 +1,1127 @@
+{
+  "video": "Courtois_85_penalties",
+  "shots": [
+    {
+      "shotStart": 0,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 711.111111111111,
+        "LeftTopY": 240.49676190476194,
+        "RightTopX": 989.0539682539682,
+        "RightTopY": 279.50628571428575,
+        "RightBottomX": 987.4285714285714,
+        "RightBottomY": 424.16660317460315,
+        "LeftBottomX": 712.7365079365078,
+        "LeftBottomY": 373.7793015873015,
+        "Frame": 60,
+        "FrameSeconds": 2.4
+      }
+    },
+    {
+      "shotStart": 5.48,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 163.35238095238094,
+        "LeftTopY": 251.87453968253962,
+        "RightTopX": 394.15873015873007,
+        "RightTopY": 214.49041269841268,
+        "RightBottomX": 397.4095238095238,
+        "RightBottomY": 325.01739682539676,
+        "LeftBottomX": 169.85396825396816,
+        "LeftBottomY": 377.03009523809527,
+        "Frame": 198,
+        "FrameSeconds": 7.9399581
+      }
+    },
+    {
+      "shotStart": 8.986666666666666,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 763.1238095238095,
+        "LeftTopY": 227.49358730158724,
+        "RightTopX": 984.1777777777777,
+        "RightTopY": 260.00152380952386,
+        "RightBottomX": 979.3015873015872,
+        "RightBottomY": 377.03009523809527,
+        "LeftBottomX": 758.2476190476191,
+        "LeftBottomY": 336.3951746031746,
+        "Frame": 300,
+        "FrameSeconds": 12.0166659
+      }
+    },
+    {
+      "shotStart": 12.493333333333332,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 642.8444444444443,
+        "LeftTopY": 237.2459682539682,
+        "RightTopX": 963.047619047619,
+        "RightTopY": 281.13168253968246,
+        "RightBottomX": 956.5460317460315,
+        "RightBottomY": 446.9221587301587,
+        "LeftBottomX": 642.8444444444443,
+        "LeftBottomY": 390.0332698412698,
+        "Frame": 368,
+        "FrameSeconds": 14.7233333
+      }
+    },
+    {
+      "shotStart": 17.92,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 924.0380952380953,
+        "LeftTopY": 209.6142222222222,
+        "RightTopX": 1148.3428571428572,
+        "RightTopY": 273.0046984126984,
+        "RightBottomX": 1141.8412698412696,
+        "RightBottomY": 385.15707936507937,
+        "LeftBottomX": 920.7873015873015,
+        "LeftBottomY": 316.89041269841266,
+        "Frame": 500,
+        "FrameSeconds": 19.989999
+      }
+    },
+    {
+      "shotStart": 20.92,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 706.2349206349205,
+        "LeftTopY": 165.72850793650792,
+        "RightTopX": 984.1777777777777,
+        "RightTopY": 237.2459682539682,
+        "RightBottomX": 979.3015873015872,
+        "RightBottomY": 385.15707936507937,
+        "LeftBottomX": 707.8603174603172,
+        "LeftBottomY": 307.13803174603174,
+        "Frame": 563,
+        "FrameSeconds": 22.5299789
+      }
+    },
+    {
+      "shotStart": 23.36,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 285.25714285714287,
+        "LeftTopY": 294.1348571428572,
+        "RightTopX": 477.05396825396815,
+        "RightTopY": 263.25231746031744,
+        "RightBottomX": 475.42857142857144,
+        "RightBottomY": 368.90311111111106,
+        "LeftBottomX": 286.8825396825396,
+        "LeftBottomY": 409.5380317460317,
+        "Frame": 647,
+        "FrameSeconds": 25.8799998
+      }
+    },
+    {
+      "shotStart": 27.2,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 327.5174603174601,
+        "LeftTopY": 168.97930158730153,
+        "RightTopX": 1002.0571428571428,
+        "RightTopY": 165.72850793650792,
+        "RightBottomX": 1002.0571428571428,
+        "RightBottomY": 385.15707936507937,
+        "LeftBottomX": 329.14285714285717,
+        "LeftBottomY": 386.78247619047625,
+        "Frame": 725,
+        "FrameSeconds": 29
+      }
+    },
+    {
+      "shotStart": 33,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 816.7619047619048,
+        "LeftTopY": 263.25231746031744,
+        "RightTopX": 1050.8190476190475,
+        "RightTopY": 290.88406349206343,
+        "RightBottomX": 1049.1936507936507,
+        "RightBottomY": 407.91263492063484,
+        "LeftBottomX": 813.5111111111111,
+        "LeftBottomY": 367.2777142857143,
+        "Frame": 862,
+        "FrameSeconds": 34.4799996
+      }
+    },
+    {
+      "shotStart": 41.45333333333333,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 823.263492063492,
+        "LeftTopY": 238.87136507936506,
+        "RightTopX": 1078.4507936507935,
+        "RightTopY": 271.37930158730154,
+        "RightBottomX": 1076.8253968253966,
+        "RightBottomY": 386.78247619047625,
+        "LeftBottomX": 821.6380952380953,
+        "LeftBottomY": 349.39834920634917,
+        "Frame": 1107,
+        "FrameSeconds": 44.2849188
+      }
+    },
+    {
+      "shotStart": 47,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 811.8857142857142,
+        "LeftTopY": 219.36660317460317,
+        "RightTopX": 1094.7047619047619,
+        "RightTopY": 251.87453968253962,
+        "RightBottomX": 1093.0793650793648,
+        "RightBottomY": 386.78247619047625,
+        "LeftBottomX": 811.8857142857142,
+        "LeftBottomY": 338.0205714285715,
+        "Frame": 1211,
+        "FrameSeconds": 48.4399789
+      }
+    },
+    {
+      "shotStart": 50.81333333333333,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 823.263492063492,
+        "LeftTopY": 246.99834920634916,
+        "RightTopX": 1068.6984126984125,
+        "RightTopY": 289.2586666666667,
+        "RightBottomX": 1067.0730158730157,
+        "RightBottomY": 419.2904126984127,
+        "LeftBottomX": 816.7619047619048,
+        "LeftBottomY": 370.52850793650794,
+        "Frame": 1363,
+        "FrameSeconds": 54.5233333
+      }
+    },
+    {
+      "shotStart": 54.626666666666665,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 808.6349206349205,
+        "LeftTopY": 194.9856507936508,
+        "RightTopX": 1011.8095238095239,
+        "RightTopY": 256.7507301587301,
+        "RightBottomX": 1006.9333333333333,
+        "RightBottomY": 375.4046984126984,
+        "LeftBottomX": 807.0095238095238,
+        "LeftBottomY": 312.0142222222222,
+        "Frame": 1425,
+        "FrameSeconds": 56.9866665
+      }
+    },
+    {
+      "shotStart": 58.44,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 792.3809523809524,
+        "LeftTopY": 204.73803174603174,
+        "RightTopX": 1054.0698412698412,
+        "RightTopY": 246.99834920634916,
+        "RightBottomX": 1049.1936507936507,
+        "RightBottomY": 401.4110476190477,
+        "LeftBottomX": 792.3809523809524,
+        "LeftBottomY": 347.7729523809524,
+        "Frame": 1502,
+        "FrameSeconds": 60.08
+      }
+    },
+    {
+      "shotStart": 61.84,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 772.8761904761905,
+        "LeftTopY": 199.86184126984125,
+        "RightTopX": 1045.942857142857,
+        "RightTopY": 240.49676190476194,
+        "RightBottomX": 1044.3174603174602,
+        "RightBottomY": 406.28723809523814,
+        "LeftBottomX": 772.8761904761905,
+        "LeftBottomY": 351.02374603174604,
+        "Frame": 1595,
+        "FrameSeconds": 63.8
+      }
+    },
+    {
+      "shotStart": 67.4,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 776.126984126984,
+        "LeftTopY": 216.11580952380956,
+        "RightTopX": 1045.942857142857,
+        "RightTopY": 260.00152380952386,
+        "RightBottomX": 1044.3174603174602,
+        "RightBottomY": 419.2904126984127,
+        "LeftBottomX": 769.6253968253967,
+        "LeftBottomY": 359.1507301587301,
+        "Frame": 1715,
+        "FrameSeconds": 68.59
+      }
+    },
+    {
+      "shotStart": 72.72,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 790.7555555555554,
+        "LeftTopY": 211.23961904761907,
+        "RightTopX": 1049.1936507936507,
+        "RightTopY": 253.4999365079365,
+        "RightBottomX": 1044.3174603174602,
+        "RightBottomY": 403.0364444444444,
+        "LeftBottomX": 785.8793650793649,
+        "LeftBottomY": 347.7729523809524,
+        "Frame": 1864,
+        "FrameSeconds": 74.58
+      }
+    },
+    {
+      "shotStart": 79.04,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 338.8952380952381,
+        "LeftTopY": 266.503111111111,
+        "RightTopX": 571.3269841269839,
+        "RightTopY": 214.49041269841268,
+        "RightBottomX": 574.5777777777777,
+        "RightBottomY": 336.3951746031746,
+        "LeftBottomX": 340.52063492063485,
+        "LeftBottomY": 393.2840634920634,
+        "Frame": 2033,
+        "FrameSeconds": 81.3299774
+      }
+    },
+    {
+      "shotStart": 86.22666666666666,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 203.9873015873015,
+        "LeftTopY": 274.6300952380953,
+        "RightTopX": 425.04126984126964,
+        "RightTopY": 242.12215873015867,
+        "RightBottomX": 425.04126984126964,
+        "RightBottomY": 347.7729523809524,
+        "LeftBottomX": 208.86349206349198,
+        "LeftBottomY": 394.9094603174603,
+        "Frame": 2220,
+        "FrameSeconds": 88.82
+      }
+    },
+    {
+      "shotStart": 89.93333333333334,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 208.86349206349198,
+        "LeftTopY": 250.24914285714289,
+        "RightTopX": 481.9301587301586,
+        "RightTopY": 209.6142222222222,
+        "RightBottomX": 485.18095238095236,
+        "RightBottomY": 329.8935873015872,
+        "LeftBottomX": 212.11428571428573,
+        "LeftBottomY": 377.03009523809527,
+        "Frame": 2296,
+        "FrameSeconds": 91.8433097
+      }
+    },
+    {
+      "shotStart": 93.64,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 194.23492063492054,
+        "LeftTopY": 258.376126984127,
+        "RightTopX": 472.1777777777777,
+        "RightTopY": 225.8681904761905,
+        "RightBottomX": 472.1777777777777,
+        "RightBottomY": 357.5253333333334,
+        "LeftBottomX": 190.9841269841268,
+        "LeftBottomY": 399.7856507936508,
+        "Frame": 2450,
+        "FrameSeconds": 97.999979
+      }
+    },
+    {
+      "shotStart": 98.03999999999999,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 891.5301587301586,
+        "LeftTopY": 201.48723809523813,
+        "RightTopX": 1084.952380952381,
+        "RightTopY": 273.0046984126984,
+        "RightBottomX": 1080.0761904761905,
+        "RightBottomY": 394.9094603174603,
+        "LeftBottomX": 885.0285714285715,
+        "LeftBottomY": 312.0142222222222,
+        "Frame": 2528,
+        "FrameSeconds": 101.1399994
+      }
+    },
+    {
+      "shotStart": 102.44,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 594.0825396825396,
+        "LeftTopY": 196.61104761904764,
+        "RightTopX": 932.1650793650792,
+        "RightTopY": 222.61739682539675,
+        "RightBottomX": 927.2888888888887,
+        "RightBottomY": 386.78247619047625,
+        "LeftBottomX": 590.8317460317459,
+        "LeftBottomY": 341.27136507936507,
+        "Frame": 2613,
+        "FrameSeconds": 104.5399572
+      }
+    },
+    {
+      "shotStart": 106.52,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 179.6063492063491,
+        "LeftTopY": 274.6300952380953,
+        "RightTopX": 434.7936507936506,
+        "RightTopY": 246.99834920634916,
+        "RightBottomX": 431.54285714285714,
+        "RightBottomY": 365.6523174603174,
+        "LeftBottomX": 181.23174603174584,
+        "LeftBottomY": 404.66184126984126,
+        "Frame": 2708,
+        "FrameSeconds": 108.3299788
+      }
+    },
+    {
+      "shotStart": 110.6,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 163.35238095238094,
+        "LeftTopY": 246.99834920634916,
+        "RightTopX": 412.03809523809525,
+        "RightTopY": 217.7412063492063,
+        "RightBottomX": 418.5396825396825,
+        "RightBottomY": 334.76977777777773,
+        "LeftBottomX": 161.72698412698395,
+        "LeftBottomY": 378.655492063492,
+        "Frame": 2863,
+        "FrameSeconds": 114.52
+      }
+    },
+    {
+      "shotStart": 114.68,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 811.8857142857142,
+        "LeftTopY": 211.23961904761907,
+        "RightTopX": 1041.0666666666666,
+        "RightTopY": 274.6300952380953,
+        "RightBottomX": 1032.9396825396825,
+        "RightBottomY": 394.9094603174603,
+        "LeftBottomX": 803.75873015873,
+        "LeftBottomY": 320.1412063492063,
+        "Frame": 2930,
+        "FrameSeconds": 117.2199997
+      }
+    },
+    {
+      "shotStart": 118.76,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 203.9873015873015,
+        "LeftTopY": 266.503111111111,
+        "RightTopX": 389.2825396825396,
+        "RightTopY": 191.73485714285718,
+        "RightBottomX": 387.65714285714284,
+        "RightBottomY": 305.51263492063487,
+        "LeftBottomX": 210.4888888888887,
+        "LeftBottomY": 381.90628571428573,
+        "Frame": 3004,
+        "FrameSeconds": 120.1699999
+      }
+    },
+    {
+      "shotStart": 122.4,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 218.61587301587292,
+        "LeftTopY": 245.37295238095243,
+        "RightTopX": 512.8126984126982,
+        "RightTopY": 177.10628571428575,
+        "RightBottomX": 511.1873015873015,
+        "RightBottomY": 339.6459682539682,
+        "LeftBottomX": 220.24126984126966,
+        "LeftBottomY": 416.03961904761906,
+        "Frame": 3104,
+        "FrameSeconds": 124.1599998
+      }
+    },
+    {
+      "shotStart": 126.9,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 151.97460317460298,
+        "LeftTopY": 271.37930158730154,
+        "RightTopX": 478.6793650793649,
+        "RightTopY": 199.86184126984125,
+        "RightBottomX": 486.8063492063491,
+        "RightBottomY": 375.4046984126984,
+        "LeftBottomX": 153.6,
+        "LeftBottomY": 469.67771428571433,
+        "Frame": 3253,
+        "FrameSeconds": 130.1349573
+      }
+    },
+    {
+      "shotStart": 132.48,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 130.84444444444435,
+        "LeftTopY": 243.74755555555555,
+        "RightTopX": 491.6825396825396,
+        "RightTopY": 152.72533333333337,
+        "RightBottomX": 490.0571428571429,
+        "RightBottomY": 365.6523174603174,
+        "LeftBottomX": 134.0952380952381,
+        "LeftBottomY": 459.92533333333336,
+        "Frame": 3357,
+        "FrameSeconds": 134.2999147
+      }
+    },
+    {
+      "shotStart": 140.37714285714284,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 238.12063492063484,
+        "LeftTopY": 263.25231746031744,
+        "RightTopX": 529.0666666666667,
+        "RightTopY": 225.8681904761905,
+        "RightBottomX": 530.6920634920634,
+        "RightBottomY": 354.2745396825396,
+        "LeftBottomX": 239.74603174603155,
+        "LeftBottomY": 404.66184126984126,
+        "Frame": 3528,
+        "FrameSeconds": 141.1099142
+      }
+    },
+    {
+      "shotStart": 148.27428571428572,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 810.2603174603173,
+        "LeftTopY": 248.623746031746,
+        "RightTopX": 1112.584126984127,
+        "RightTopY": 281.13168253968246,
+        "RightBottomX": 1112.584126984127,
+        "RightBottomY": 422.5412063492063,
+        "LeftBottomX": 807.0095238095238,
+        "LeftBottomY": 373.7793015873015,
+        "Frame": 3710,
+        "FrameSeconds": 148.4071416
+      }
+    },
+    {
+      "shotStart": 152.22285714285715,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 189.35873015873005,
+        "LeftTopY": 277.8808888888889,
+        "RightTopX": 416.9142857142857,
+        "RightTopY": 246.99834920634916,
+        "RightBottomX": 420.1650793650792,
+        "RightBottomY": 355.8999365079365,
+        "LeftBottomX": 192.6095238095238,
+        "LeftBottomY": 398.1602539682539,
+        "Frame": 3874,
+        "FrameSeconds": 154.9442853
+      }
+    },
+    {
+      "shotStart": 156.17142857142858,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 829.7650793650791,
+        "LeftTopY": 222.61739682539675,
+        "RightTopX": 1117.4603174603174,
+        "RightTopY": 273.0046984126984,
+        "RightBottomX": 1114.2095238095237,
+        "RightBottomY": 412.78882539682536,
+        "LeftBottomX": 826.5142857142857,
+        "LeftBottomY": 351.02374603174604,
+        "Frame": 3973,
+        "FrameSeconds": 158.9328571
+      }
+    },
+    {
+      "shotStart": 160.12,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 715.9873015873015,
+        "LeftTopY": 194.9856507936508,
+        "RightTopX": 1089.8285714285714,
+        "RightTopY": 229.11898412698412,
+        "RightBottomX": 1081.701587301587,
+        "RightBottomY": 406.28723809523814,
+        "LeftBottomX": 712.7365079365078,
+        "LeftBottomY": 355.8999365079365,
+        "Frame": 4041,
+        "FrameSeconds": 161.6499998
+      }
+    },
+    {
+      "shotStart": 163.12,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 176.35555555555538,
+        "LeftTopY": 281.13168253968246,
+        "RightTopX": 400.6603174603173,
+        "RightTopY": 253.4999365079365,
+        "RightBottomX": 402.2857142857143,
+        "RightBottomY": 359.1507301587301,
+        "LeftBottomX": 174.73015873015865,
+        "LeftBottomY": 396.53485714285716,
+        "Frame": 4126,
+        "FrameSeconds": 165.0599777
+      }
+    },
+    {
+      "shotStart": 170.26666666666665,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 145.47301587301578,
+        "LeftTopY": 261.62692063492057,
+        "RightTopX": 410.4126984126982,
+        "RightTopY": 219.36660317460317,
+        "RightBottomX": 412.03809523809525,
+        "RightBottomY": 336.3951746031746,
+        "LeftBottomX": 150.34920634920627,
+        "LeftBottomY": 391.6586666666667,
+        "Frame": 4298,
+        "FrameSeconds": 171.9099977
+      }
+    },
+    {
+      "shotStart": 173.77333333333334,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 943.5428571428571,
+        "LeftTopY": 245.37295238095243,
+        "RightTopX": 1153.2190476190476,
+        "RightTopY": 290.88406349206343,
+        "RightBottomX": 1148.3428571428572,
+        "RightBottomY": 399.7856507936508,
+        "LeftBottomX": 935.4158730158729,
+        "LeftBottomY": 349.39834920634917,
+        "Frame": 4391,
+        "FrameSeconds": 175.6233333
+      }
+    },
+    {
+      "shotStart": 177.28,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 134.0952380952381,
+        "LeftTopY": 276.255492063492,
+        "RightTopX": 377.9047619047619,
+        "RightTopY": 222.61739682539675,
+        "RightBottomX": 382.7809523809524,
+        "RightBottomY": 342.89676190476195,
+        "LeftBottomX": 138.97142857142856,
+        "LeftBottomY": 403.0364444444444,
+        "Frame": 4471,
+        "FrameSeconds": 178.839979
+      }
+    },
+    {
+      "shotStart": 182.44,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 919.1619047619048,
+        "LeftTopY": 225.8681904761905,
+        "RightTopX": 1179.2253968253967,
+        "RightTopY": 255.12533333333337,
+        "RightBottomX": 1172.7238095238095,
+        "RightBottomY": 385.15707936507937,
+        "LeftBottomX": 914.2857142857143,
+        "LeftBottomY": 339.6459682539682,
+        "Frame": 4595,
+        "FrameSeconds": 183.8199786
+      }
+    },
+    {
+      "shotStart": 191.56,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 794.0063492063491,
+        "LeftTopY": 207.98882539682535,
+        "RightTopX": 1005.3079365079363,
+        "RightTopY": 269.7539047619048,
+        "RightBottomX": 997.1809523809524,
+        "RightBottomY": 386.78247619047625,
+        "LeftBottomX": 790.7555555555554,
+        "LeftBottomY": 318.51580952380954,
+        "Frame": 4820,
+        "FrameSeconds": 192.8199371
+      }
+    },
+    {
+      "shotStart": 194.88,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 164.97777777777767,
+        "LeftTopY": 286.007873015873,
+        "RightTopX": 384.4063492063491,
+        "RightTopY": 255.12533333333337,
+        "RightBottomX": 387.65714285714284,
+        "RightBottomY": 362.40152380952384,
+        "LeftBottomX": 163.35238095238094,
+        "LeftBottomY": 396.53485714285716,
+        "Frame": 4924,
+        "FrameSeconds": 196.9599997
+      }
+    },
+    {
+      "shotStart": 199.52,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 795.6317460317458,
+        "LeftTopY": 229.11898412698412,
+        "RightTopX": 1006.9333333333333,
+        "RightTopY": 274.6300952380953,
+        "RightBottomX": 998.8063492063491,
+        "RightBottomY": 388.40787301587295,
+        "LeftBottomX": 792.3809523809524,
+        "LeftBottomY": 329.8935873015872,
+        "Frame": 5035,
+        "FrameSeconds": 201.3899567
+      }
+    },
+    {
+      "shotStart": 206.69,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 210.4888888888887,
+        "LeftTopY": 260.00152380952386,
+        "RightTopX": 413.66349206349196,
+        "RightTopY": 211.23961904761907,
+        "RightBottomX": 416.9142857142857,
+        "RightBottomY": 318.51580952380954,
+        "LeftBottomX": 210.4888888888887,
+        "LeftBottomY": 368.90311111111106,
+        "Frame": 5188,
+        "FrameSeconds": 207.5274142
+      }
+    },
+    {
+      "shotStart": 210.26,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 229.9936507936506,
+        "LeftTopY": 276.255492063492,
+        "RightTopX": 493.30793650793635,
+        "RightTopY": 237.2459682539682,
+        "RightBottomX": 496.55873015873004,
+        "RightBottomY": 346.1475555555555,
+        "LeftBottomX": 238.12063492063484,
+        "LeftBottomY": 393.2840634920634,
+        "Frame": 5269,
+        "FrameSeconds": 210.7774372
+      }
+    },
+    {
+      "shotStart": 213.83,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 195.86031746031728,
+        "LeftTopY": 299.01104761904764,
+        "RightTopX": 403.91111111111104,
+        "RightTopY": 240.49676190476194,
+        "RightBottomX": 410.4126984126982,
+        "RightBottomY": 349.39834920634917,
+        "LeftBottomX": 199.11111111111103,
+        "LeftBottomY": 417.6650158730158,
+        "Frame": 5356,
+        "FrameSeconds": 214.2599988
+      }
+    },
+    {
+      "shotStart": 217.4,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 823.263492063492,
+        "LeftTopY": 233.9951746031746,
+        "RightTopX": 1093.0793650793648,
+        "RightTopY": 268.1285079365079,
+        "RightBottomX": 1091.4539682539682,
+        "RightBottomY": 388.40787301587295,
+        "LeftBottomX": 823.263492063492,
+        "LeftBottomY": 344.52215873015865,
+        "Frame": 5496,
+        "FrameSeconds": 219.8375
+      }
+    },
+    {
+      "shotStart": 235.32,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 519.3142857142857,
+        "LeftTopY": 250.24914285714289,
+        "RightTopX": 769.6253968253967,
+        "RightTopY": 250.24914285714289,
+        "RightBottomX": 769.6253968253967,
+        "RightBottomY": 328.2681904761905,
+        "LeftBottomX": 517.6888888888888,
+        "LeftBottomY": 333.14438095238097,
+        "Frame": 5921,
+        "FrameSeconds": 236.85
+      }
+    },
+    {
+      "shotStart": 240.08,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 223.4920634920634,
+        "LeftTopY": 308.7634285714286,
+        "RightTopX": 399.0349206349205,
+        "RightTopY": 264.8777142857143,
+        "RightBottomX": 402.2857142857143,
+        "RightBottomY": 355.8999365079365,
+        "LeftBottomX": 223.4920634920634,
+        "LeftBottomY": 406.28723809523814,
+        "Frame": 6056,
+        "FrameSeconds": 242.25
+      }
+    },
+    {
+      "shotStart": 243.94,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 836.2666666666667,
+        "LeftTopY": 207.98882539682535,
+        "RightTopX": 1091.4539682539682,
+        "RightTopY": 248.623746031746,
+        "RightBottomX": 1089.8285714285714,
+        "RightBottomY": 373.7793015873015,
+        "LeftBottomX": 837.8920634920634,
+        "LeftBottomY": 326.64279365079364,
+        "Frame": 6119,
+        "FrameSeconds": 244.755
+      }
+    },
+    {
+      "shotStart": 247.8,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 425.04126984126964,
+        "LeftTopY": 160.85231746031744,
+        "RightTopX": 815.1365079365078,
+        "RightTopY": 162.4777142857143,
+        "RightBottomX": 808.6349206349205,
+        "RightBottomY": 289.2586666666667,
+        "LeftBottomX": 434.7936507936506,
+        "LeftBottomY": 286.007873015873,
+        "Frame": 6263,
+        "FrameSeconds": 250.5099144
+      }
+    },
+    {
+      "shotStart": 251.66000000000003,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 265.752380952381,
+        "LeftTopY": 129.96977777777772,
+        "RightTopX": 987.4285714285714,
+        "RightTopY": 138.09676190476193,
+        "RightBottomX": 976.0507936507935,
+        "RightBottomY": 368.90311111111106,
+        "LeftBottomX": 264.1269841269839,
+        "LeftBottomY": 368.90311111111106,
+        "Frame": 6359,
+        "FrameSeconds": 254.345
+      }
+    },
+    {
+      "shotStart": 255.52,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 434.7936507936506,
+        "LeftTopY": 198.23644444444437,
+        "RightTopX": 816.7619047619048,
+        "RightTopY": 204.73803174603174,
+        "RightBottomX": 813.5111111111111,
+        "RightBottomY": 329.8935873015872,
+        "LeftBottomX": 434.7936507936506,
+        "LeftBottomY": 325.01739682539676,
+        "Frame": 6433,
+        "FrameSeconds": 257.3399781
+      }
+    },
+    {
+      "shotStart": 259.04,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 387.65714285714284,
+        "LeftTopY": 193.36025396825391,
+        "RightTopX": 852.5206349206348,
+        "RightTopY": 201.48723809523813,
+        "RightBottomX": 847.6444444444444,
+        "RightBottomY": 355.8999365079365,
+        "LeftBottomX": 387.65714285714284,
+        "LeftBottomY": 346.1475555555555,
+        "Frame": 6534,
+        "FrameSeconds": 261.3699998
+      }
+    },
+    {
+      "shotStart": 262.6,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 299.8857142857143,
+        "LeftTopY": 165.72850793650792,
+        "RightTopX": 967.9238095238095,
+        "RightTopY": 172.23009523809526,
+        "RightBottomX": 961.422222222222,
+        "RightBottomY": 388.40787301587295,
+        "LeftBottomX": 301.511111111111,
+        "LeftBottomY": 385.15707936507937,
+        "Frame": 6642,
+        "FrameSeconds": 265.6799778
+      }
+    },
+    {
+      "shotStart": 267.28,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 712.7365079365078,
+        "LeftTopY": 248.623746031746,
+        "RightTopX": 893.1555555555553,
+        "RightTopY": 300.6364444444444,
+        "RightBottomX": 894.7809523809524,
+        "RightBottomY": 407.91263492063484,
+        "LeftBottomX": 707.8603174603172,
+        "LeftBottomY": 349.39834920634917,
+        "Frame": 6728,
+        "FrameSeconds": 269.13
+      }
+    },
+    {
+      "shotStart": 271.84,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 816.7619047619048,
+        "LeftTopY": 273.0046984126984,
+        "RightTopX": 972.8,
+        "RightTopY": 320.1412063492063,
+        "RightBottomX": 967.9238095238095,
+        "RightBottomY": 416.03961904761906,
+        "LeftBottomX": 811.8857142857142,
+        "LeftBottomY": 359.1507301587301,
+        "Frame": 6850,
+        "FrameSeconds": 273.9899158
+      }
+    },
+    {
+      "shotStart": 278.52,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 761.4984126984125,
+        "LeftTopY": 229.11898412698412,
+        "RightTopX": 943.5428571428571,
+        "RightTopY": 284.3824761904762,
+        "RightBottomX": 935.4158730158729,
+        "RightBottomY": 391.6586666666667,
+        "LeftBottomX": 756.622222222222,
+        "LeftBottomY": 329.8935873015872,
+        "Frame": 7010,
+        "FrameSeconds": 280.3899756
+      }
+    },
+    {
+      "shotStart": 283.84,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 792.3809523809524,
+        "LeftTopY": 240.49676190476194,
+        "RightTopX": 943.5428571428571,
+        "RightTopY": 294.1348571428572,
+        "RightBottomX": 937.0412698412697,
+        "RightBottomY": 377.03009523809527,
+        "LeftBottomX": 787.504761904762,
+        "LeftBottomY": 331.5189841269841,
+        "Frame": 7117,
+        "FrameSeconds": 284.6699996
+      }
+    },
+    {
+      "shotStart": 292.44,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 254.37460317460298,
+        "LeftTopY": 281.13168253968246,
+        "RightTopX": 438.04444444444437,
+        "RightTopY": 224.24279365079363,
+        "RightBottomX": 436.4190476190476,
+        "RightBottomY": 321.7666031746032,
+        "LeftBottomX": 259.25079365079347,
+        "LeftBottomY": 388.40787301587295,
+        "Frame": 7389,
+        "FrameSeconds": 295.5649996
+      }
+    },
+    {
+      "shotStart": 296.84,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 818.3873015873015,
+        "LeftTopY": 266.503111111111,
+        "RightTopX": 1024.8126984126982,
+        "RightTopY": 302.2618412698413,
+        "RightBottomX": 1016.6857142857143,
+        "RightBottomY": 420.91580952380957,
+        "LeftBottomX": 813.5111111111111,
+        "LeftBottomY": 375.4046984126984,
+        "Frame": 7460,
+        "FrameSeconds": 298.3999786
+      }
+    },
+    {
+      "shotStart": 299.76,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 416.9142857142857,
+        "LeftTopY": 212.8650158730158,
+        "RightTopX": 824.8888888888887,
+        "RightTopY": 216.11580952380956,
+        "RightBottomX": 820.0126984126982,
+        "RightBottomY": 346.1475555555555,
+        "LeftBottomX": 418.5396825396825,
+        "LeftBottomY": 351.02374603174604,
+        "Frame": 7560,
+        "FrameSeconds": 302.4199361
+      }
+    },
+    {
+      "shotStart": 303.96,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 392.53333333333336,
+        "LeftTopY": 237.2459682539682,
+        "RightTopX": 802.1333333333333,
+        "RightTopY": 225.8681904761905,
+        "RightBottomX": 803.75873015873,
+        "RightBottomY": 362.40152380952384,
+        "LeftBottomX": 397.4095238095238,
+        "LeftBottomY": 385.15707936507937,
+        "Frame": 7642,
+        "FrameSeconds": 305.6799574
+      }
+    },
+    {
+      "shotStart": 307.44,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 189.35873015873005,
+        "LeftTopY": 266.503111111111,
+        "RightTopX": 390.9079365079363,
+        "RightTopY": 211.23961904761907,
+        "RightBottomX": 392.53333333333336,
+        "RightBottomY": 312.0142222222222,
+        "LeftBottomX": 194.23492063492054,
+        "LeftBottomY": 373.7793015873015,
+        "Frame": 7806,
+        "FrameSeconds": 312.2249787
+      }
+    },
+    {
+      "shotStart": 312.34000000000003,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 423.41587301587293,
+        "LeftTopY": 268.1285079365079,
+        "RightTopX": 719.2380952380952,
+        "RightTopY": 258.376126984127,
+        "RightBottomX": 717.6126984126983,
+        "RightBottomY": 352.64914285714286,
+        "LeftBottomX": 426.6666666666667,
+        "LeftBottomY": 367.2777142857143,
+        "Frame": 7891,
+        "FrameSeconds": 315.6449575
+      }
+    },
+    {
+      "shotStart": 318.84,
+      "calibration": {
+        "VideoWidth": 1280,
+        "VideoHeight": 720,
+        "LeftTopX": 470.55238095238093,
+        "LeftTopY": 256.7507301587301,
+        "RightTopX": 842.7682539682539,
+        "RightTopY": 258.376126984127,
+        "RightBottomX": 839.5174603174602,
+        "RightBottomY": 378.655492063492,
+        "LeftBottomX": 467.30158730158723,
+        "LeftBottomY": 380.28088888888885,
+        "Frame": 8010,
+        "FrameSeconds": 320.4199999
+      }
+    }
+  ]
+}

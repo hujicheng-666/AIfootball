@@ -1,0 +1,31 @@
+{
+    "DisplayName":  "Elite Coverage Keeper",
+    "Description":  "Tall, fast and disciplined. Most zones are reliable, including high corners.",
+    "Height":  1.96,
+    "DiveSpeed":  5.2,
+    "JumpDistance":  1.72,
+    "JumpHeight":  0.78,
+    "Reach":  0.82,
+    "TendGoalSpeed":  4.35,
+    "TendGoalDistance":  2.05,
+    "GoalKeeping":  0.94,
+    "SidePreference":  0,
+    "HeightPreference":  0.12,
+    "ProbabilityMap":  {
+                           "LowLeft":  0.86,
+                           "LowMidLeft":  0.91,
+                           "LowCenter":  0.96,
+                           "LowMidRight":  0.91,
+                           "LowRight":  0.86,
+                           "MidLeft":  0.82,
+                           "MidMidLeft":  0.88,
+                           "MidCenter":  0.94,
+                           "MidMidRight":  0.88,
+                           "MidRight":  0.82,
+                           "HighLeft":  0.72,
+                           "HighMidLeft":  0.8,
+                           "HighCenter":  0.88,
+                           "HighMidRight":  0.8,
+                           "HighRight":  0.72
+                       }
+}
