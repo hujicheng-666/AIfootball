@@ -861,8 +861,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _retargeter: {fileID: 838247407}
+  _animator: {fileID: 1890817704}
   _facingTarget: {fileID: 225908269}
   _ball: {fileID: 153709822}
+  _animClip: {fileID: -4791504522942941401, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+  _clipKickTime: 0.767
+  _clipStandOffset: 0.36
   _poseJson: {fileID: 0}
   _poseResourcePath: ShooterPoses/SH_PenaltyKick
   _poseResourcePaths:
@@ -877,8 +881,8 @@ MonoBehaviour:
   _standOffset: 0.26
   _runUpDistance: 2.2
   _yawOffset: 0
-  _rootYOffset: 0.128
-  _recolorKit: 1
+  _rootYOffset: 0
+  _recolorKit: 0
   _kitColor: {r: 0.85, g: 0.2, b: 0.18, a: 1}
   _logEvents: 1
 --- !u!114 &838247407
@@ -888,7 +892,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 838247404}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 07675eed89e9ae54d8f79bbccb5ab253, type: 3}
   m_Name: 
@@ -917,6 +921,7 @@ Transform:
   - {fileID: 1540113973}
   - {fileID: 1406617299}
   - {fileID: 1334484876}
+  - {fileID: 1890817705}
   m_Father: {fileID: 0}
   m_RootOrder: 6
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -1415,6 +1420,10 @@ PrefabInstance:
     - target: {fileID: 2976168028574919726, guid: 521dd0080e0a3794ab34e8cac39f710d, type: 3}
       propertyPath: m_Name
       value: Character
+      objectReference: {fileID: 0}
+    - target: {fileID: 2976168028574919726, guid: 521dd0080e0a3794ab34e8cac39f710d, type: 3}
+      propertyPath: m_IsActive
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 521dd0080e0a3794ab34e8cac39f710d, type: 3}
@@ -2225,6 +2234,73 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1766659270}
   m_Mesh: {fileID: 4300012, guid: e0b286e17ae0ae14f9225359200e999b, type: 3}
+--- !u!1001 &1890817703
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    m_TransformParent: {fileID: 838247408}
+    m_Modifications:
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_RootOrder
+      value: 4
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+      propertyPath: m_Name
+      value: ShooterMixamo
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+  m_SourcePrefab: {fileID: 100100000, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+--- !u!95 &1890817704 stripped
+Animator:
+  m_CorrespondingSourceObject: {fileID: 5866666021909216657, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+  m_PrefabInstance: {fileID: 1890817703}
+  m_PrefabAsset: {fileID: 0}
+--- !u!4 &1890817705 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 4e2c0ec1ac6e842448192bd223bfe08b, type: 3}
+  m_PrefabInstance: {fileID: 1890817703}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1001 &1907911442
 PrefabInstance:
   m_ObjectHideFlags: 0
