@@ -40,6 +40,15 @@ cd AIfootball
 dotnet build src\AIfootball.sln -c Release   # 只构建 WPF App（单体版）
 ```
 
+> 前端产物 `src\AIfootball.Web\dist` 已入库（主界面由 WebView2 加载它）。
+> **改了 `src\AIfootball.Web` 的 React 源码后必须重建并提交**，否则跑的还是旧的 dist：
+>
+> ```powershell
+> cd src\AIfootball.Web; npm install; npm run build   # 需要 Node 18+
+> ```
+>
+> 只改 C# 则无需 Node，dist 现成可用。
+
 ### 3. 运行
 
 ```text
