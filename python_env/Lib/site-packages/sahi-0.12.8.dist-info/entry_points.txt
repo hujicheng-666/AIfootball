@@ -1,0 +1,2 @@
+[console_scripts]
+sahi = sahi.cli:app
