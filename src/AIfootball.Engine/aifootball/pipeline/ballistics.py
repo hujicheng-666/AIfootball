@@ -28,6 +28,7 @@ from ..constants import (
     GOAL_HALF_WIDTH_M,
     GOAL_HEIGHT_M,
 )
+from ..workspace import get_workspace, set_workspace
 
 # 路径不再在 import 期固化（见 workspace.py）：
 #   输入 output/trajectory_3d        -> get_workspace().trajectory_3d

@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from aifootball import workspace as workspace_module
 from aifootball.workspace import (
@@ -137,6 +138,16 @@ class WorkspaceLayoutTest(WorkspaceTestCase):
         os.environ["AIFOOTBALL_WORKSPACE"] = str(tmp)
         os.environ["YOLO_MODEL_PATH"] = str(tmp / "w.pt")
         self.assertEqual(get_workspace().yolo_model_path(), tmp / "w.pt")
+
+    def test_ballistics_run_discovers_samples_in_explicit_workspace(self):
+        from aifootball.pipeline import ballistics
+
+        workspace = Workspace(self.temp_dir())
+        (workspace.trajectory_3d / "sample1").mkdir(parents=True)
+        with patch.object(ballistics, "process_sample") as process_sample:
+            self.assertEqual(ballistics.run(workspace=workspace.root), ["sample1"])
+        process_sample.assert_called_once_with("sample1")
+        self.assertTrue(workspace.trajectory_ballistic.is_dir())
 
 
 class NoFrozenPathConstantsTest(WorkspaceTestCase):
