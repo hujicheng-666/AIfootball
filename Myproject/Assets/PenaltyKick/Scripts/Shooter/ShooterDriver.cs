@@ -33,10 +33,20 @@ namespace PenaltyKickPlatform.Shooter
         [Header("引用")]
         [Tooltip("射手重定向器；留空则自动在本对象上查找")]
         [SerializeField] private ShooterRetargeter _retargeter;
+        [Tooltip("模型 Animator；留空则自动在子物体中查找")]
+        [SerializeField] private Animator _animator;
         [Tooltip("朝向目标（通常是球门）；射手会始终面朝它")]
         [SerializeField] private Transform _facingTarget;
         [Tooltip("球，用于推算站位；留空则使用本对象的初始位置")]
         [SerializeField] private Transform _ball;
+
+        [Header("动画片段驱动（优先于 JSON）")]
+        [Tooltip("非空时用 AnimationClip 直驱 Animator：保留全部骨骼与手指数据，动作与源 FBX 逐帧一致。\n此时下面的 JSON 姿态全部忽略；把它清空即可一键回退到 JSON 驱动。")]
+        [SerializeField] private AnimationClip _animClip;
+        [Tooltip("该 clip 的触球时刻（秒）。源动画 60fps 共 91 帧，右脚触球在第 46 帧 → 0.767s")]
+        [SerializeField] private float _clipKickTime = 0.767f;
+        [Tooltip("触球瞬间「髋到球」的水平距离（米）；脚在该帧位于髋前约 0.36m")]
+        [SerializeField] private float _clipStandOffset = 0.36f;
 
         [Header("姿态数据")]
         [Tooltip("直接指定 JSON；留空则从 Resources 按下面的路径加载")]
@@ -92,6 +102,13 @@ namespace PenaltyKickPlatform.Shooter
         private float _kickTime;
         private float _groundY;
 
+        // ---- clip 驱动模式运行时状态 ----
+        private GameObject _clipRoot;      // SampleAnimation 的作用根节点（模型根）
+        private Vector2[] _hipSamples;     // 相对触球帧的髋水平偏移（x,z）
+        private Vector2 _hipAtKick;        // 触球帧髋在模型局部空间的绝对偏移
+        private float _hipSampleDt;
+        private bool _graphReady;          // clip 模式是否已就绪
+
         public ShooterPhase Phase { get { return _phase; } }
         public bool IsPlaying { get { return _phase != ShooterPhase.Idle && _phase != ShooterPhase.Done; } }
         public ShooterPoseClip Clip { get { return _clip; } }
@@ -106,15 +123,24 @@ namespace PenaltyKickPlatform.Shooter
             }
         }
 
+        /// <summary>是否处于动画片段驱动模式（忽略 JSON 数据）。</summary>
+        public bool UsesAnimatorClip { get { return _animClip != null; } }
+        private bool HasAnyClip { get { return _animClip != null || _clip != null; } }
+        private float ClipDuration
+        {
+            get { return _animClip != null ? _animClip.length : (_clip != null ? _clip.Duration : 0f); }
+        }
+
         /// <summary>片段是否自带助跑位移。自带时位移由数据驱动，跳过程序化助跑阶段。</summary>
-        public bool UsesRootMotion { get { return _clip != null && _clip.HasRootMotion; } }
+        public bool UsesRootMotion { get { return _animClip != null || (_clip != null && _clip.HasRootMotion); } }
         /// <summary>整段前奏总时长（秒）。</summary>
-        public float IntroDuration { get { return _clip != null ? KickTimeInIntro + (_clip.Duration - _kickTime) : 0f; } }
+        public float IntroDuration { get { return HasAnyClip ? KickTimeInIntro + (ClipDuration - _kickTime) : 0f; } }
 
         private void Awake()
         {
             if (_retargeter == null) _retargeter = GetComponent<ShooterRetargeter>();
             if (_retargeter == null) _retargeter = GetComponentInChildren<ShooterRetargeter>();
+            if (_animator == null) _animator = GetComponentInChildren<Animator>();
 
             // 姿态由本组件统一驱动，避免 Retargeter 在 LateUpdate 里重复应用
             if (_retargeter != null) _retargeter.SetAutoUpdate(false);
@@ -126,8 +152,138 @@ namespace PenaltyKickPlatform.Shooter
         private void Start()
         {
             ApplyKitColor();
-            LoadClipIfNeeded();
+            if (_animClip != null) InitClipPlayable();
+            if (_animClip == null) LoadClipIfNeeded();
             StopAndReset();
+        }
+
+        // ==================== clip 驱动模式 ====================
+
+        /// <summary>
+        /// 进入 clip 驱动模式。这里刻意不用 PlayableGraph：
+        /// 编辑模式与 batchmode 下 PlayableGraph.Evaluate 不推进动画（实测髋轨迹 91 个采样点全同值），
+        /// 而 AnimationClip.SampleAnimation 在两种模式下都稳定生效，且时间轴完全由本组件掌控。
+        /// 代价是需要关掉 Animator，否则它每帧会把姿态覆盖回去。
+        /// </summary>
+        private void InitClipPlayable()
+        {
+            if (_animator == null)
+            {
+                Debug.LogError("[ShooterDriver] clip 驱动模式需要 Animator，未在子物体中找到，退回 JSON 模式。", this);
+                _animClip = null;
+                return;
+            }
+
+            _animator.applyRootMotion = false;
+            _animator.Rebind();        // 实例化/编辑模式下骨骼绑定可能尚未建立
+            _animator.enabled = false; // 关掉，避免它覆盖 SampleAnimation 写入的骨骼
+
+            _clipRoot = _animator.gameObject;
+            _graphReady = true;
+
+            _kickTime = Mathf.Clamp(_clipKickTime, 0f, _animClip.length);
+            PreSampleHips();
+
+            if (_logEvents)
+                Debug.Log(string.Format(
+                    "[ShooterDriver] clip 模式：{0} 长 {1:0.###}s，触球 {2:0.###}s，髋轨迹 {3} 点，前进 {4:0.##}m",
+                    _animClip.name, _animClip.length, _kickTime,
+                    _hipSamples != null ? _hipSamples.Length : 0,
+                    HipTravelDistance()), this);
+        }
+
+        /// <summary>预采样髋水平轨迹，并换算成「相对触球帧」的偏移。</summary>
+        private void PreSampleHips()
+        {
+            if (!_graphReady || _clipRoot == null || _animClip == null) return;
+
+            Transform hips = _animator != null ? _animator.GetBoneTransform(HumanBodyBones.Hips) : null;
+            if (hips == null) hips = FindDeep(_clipRoot.transform, "Hips");
+            if (hips == null)
+            {
+                Debug.LogError("[ShooterDriver] 取不到 Hips 骨骼，髋轨迹不可用，角色将原地播放。", this);
+                return;
+            }
+
+            float dur = _animClip.length;
+            int n = Mathf.Max(2, Mathf.RoundToInt(dur * 60f) + 1);
+            _hipSampleDt = dur / (n - 1);
+
+            Vector2[] raw = new Vector2[n];
+            for (int i = 0; i < n; i++)
+            {
+                _animClip.SampleAnimation(_clipRoot, i * _hipSampleDt);
+                Vector3 p = hips.localPosition;
+                raw[i] = new Vector2(p.x, p.z);
+            }
+
+            // 以触球帧为原点：这样 PlaceByRootMotion 能让触球瞬间正好站在站位点上
+            int ki = Mathf.Clamp(Mathf.RoundToInt(_kickTime / Mathf.Max(1e-6f, _hipSampleDt)), 0, n - 1);
+            Vector2 atKick = raw[ki];
+            _hipAtKick = atKick;
+            _hipSamples = new Vector2[n];
+            for (int i = 0; i < n; i++) _hipSamples[i] = raw[i] - atKick;
+
+            if (_logEvents)
+                Debug.Log(string.Format(
+                    "[ShooterDriver] 髋轨迹采样: 首=({0:F3},{1:F3}) 触球=({2:F3},{3:F3}) 末=({4:F3},{5:F3}) 前进 {6:F3}m",
+                    raw[0].x, raw[0].y, atKick.x, atKick.y, raw[n - 1].x, raw[n - 1].y,
+                    Vector2.Distance(raw[0], raw[n - 1])), this);
+
+            _animClip.SampleAnimation(_clipRoot, 0f);
+        }
+
+        private static Transform FindDeep(Transform root, string keyword)
+        {
+            if (root.name.ToLowerInvariant().Contains(keyword.ToLowerInvariant())) return root;
+            foreach (Transform c in root)
+            {
+                var r = FindDeep(c, keyword);
+                if (r != null) return r;
+            }
+            return null;
+        }
+
+        private float HipTravelDistance()
+        {
+            if (_hipSamples == null || _hipSamples.Length < 2) return 0f;
+            return Vector2.Distance(_hipSamples[0], _hipSamples[_hipSamples.Length - 1]);
+        }
+
+        /// <summary>统一取髋水平偏移（相对触球帧）：clip 模式查预采样表，JSON 模式查帧数据。</summary>
+        private Vector2 SampleHipUnified(float t)
+        {
+            if (_animClip != null)
+            {
+                if (_hipSamples == null || _hipSamples.Length < 2) return Vector2.zero;
+                float f = Mathf.Clamp(t / Mathf.Max(1e-6f, _hipSampleDt), 0f, _hipSamples.Length - 1);
+                int i0 = Mathf.FloorToInt(f);
+                int i1 = Mathf.Min(i0 + 1, _hipSamples.Length - 1);
+                float k = f - i0;
+                return Vector2.Lerp(_hipSamples[i0], _hipSamples[i1], k);
+            }
+            return _clip != null ? _clip.SampleHip(t) : Vector2.zero;
+        }
+
+        /// <summary>统一按时间应用姿态：clip 模式采样动画片段，JSON 模式走重定向器。</summary>
+        private void ApplyPoseAt(float t)
+        {
+            if (_animClip != null)
+            {
+                if (!_graphReady || _clipRoot == null) return;
+                _animClip.SampleAnimation(_clipRoot, Mathf.Clamp(t, 0f, _animClip.length));
+                return;
+            }
+            if (_retargeter != null)
+            {
+                _retargeter.SetTime(t);
+                _retargeter.ApplyPose();
+            }
+        }
+
+        private void OnDestroy()
+        {
+            _graphReady = false;
         }
 
         /// <summary>
@@ -191,6 +347,7 @@ namespace PenaltyKickPlatform.Shooter
 
         private void LoadClip(bool forceRepick)
         {
+            if (_animClip != null) return;   // clip 驱动模式不使用 JSON 姿态
             if (_clip != null && !forceRepick) return;
 
             string path = forceRepick ? PickPosePath()
@@ -254,8 +411,10 @@ namespace PenaltyKickPlatform.Shooter
         /// <summary>开始播放整段前奏。返回 false 表示数据缺失，调用方应直接播放球轨迹。</summary>
         public bool Play()
         {
-            LoadClip(true);   // 每次开球重新抽一个姿态，避免千篇一律
-            if (_clip == null) return false;
+            if (_animClip == null) LoadClip(true);   // 每次开球重新抽一个姿态，避免千篇一律
+            if (!HasAnyClip) return false;
+            if (_animClip != null && !_graphReady) InitClipPlayable();
+            if (!HasAnyClip) return false;
 
             // 先定朝向：根位移要乘 transform.rotation，朝向没定就会算错起点
             KeepFacingTarget();
@@ -265,10 +424,12 @@ namespace PenaltyKickPlatform.Shooter
             _phaseTime = 0f;
             _kickFired = false;
 
-            // 起跑前站定：用片段首帧的自然站姿，而不是 bind pose。
-            // bind pose 是 A-pose（两臂张成 20°~40°），在跑动开始前会先在原地
-            // 摆出一个像"举手"的站姿，比动作本身还显眼。首帧是动捕里真实的准备姿势。
-            if (_retargeter != null)
+            if (_animClip != null)
+            {
+                // clip 首帧是动捕里真实的准备姿势
+                ApplyPoseAt(0f);
+            }
+            else if (_retargeter != null)
             {
                 // Hold 阶段用 rest 自然站姿等待起跑(姿态片段首帧是摆腿准备, 不适合站立)
                 _retargeter.SetClip(_clip);
@@ -278,16 +439,25 @@ namespace PenaltyKickPlatform.Shooter
             return true;
         }
 
-        /// <summary>中止并回到待机：位置复位到踢球站位，姿态回到自然站立。</summary>
+        /// <summary>
+        /// 中止并回到待机：位置复位到**助跑起点**（不是踢球站位），姿态回到自然站立。
+        /// 回到起点而非站位，是为了让待机位置与下一次 Play() 的起始位置一致，
+        /// 避免开播瞬间从球边瞬移到身后。
+        /// </summary>
         public void StopAndReset()
         {
             _phase = ShooterPhase.Idle;
             _phaseTime = 0f;
             _kickFired = false;
-            ComputeStandPositions();
-            transform.position = _strikePosition;
+            // 与 Play() 保持同一顺序：先定朝向再算站位，否则两处结果不一致
             KeepFacingTarget();
-            if (_retargeter != null)
+            ComputeStandPositions();
+            transform.position = _startPosition;
+            if (_animClip != null)
+            {
+                ApplyPoseAt(0f);       // 停在首帧（准备姿势）
+            }
+            else if (_retargeter != null)
             {
                 // 待机用 rest 自然站姿
                 _retargeter.SetRestBlend(1f);
@@ -297,24 +467,39 @@ namespace PenaltyKickPlatform.Shooter
 
         private void ComputeStandPositions()
         {
+            Vector3 anchor = _ball != null ? _ball.position : transform.position;
+
+            // 以球心为参考而不是射手当前位置：位置与朝向互为输入时，
+            // 每次复位都会基于上一次的结果重算，导致站位反复迭代漂移。
             Vector3 forward = Vector3.forward;
             if (_facingTarget != null)
             {
-                Vector3 flat = Vector3.ProjectOnPlane(_facingTarget.position - transform.position, Vector3.up);
+                Vector3 flat = Vector3.ProjectOnPlane(_facingTarget.position - anchor, Vector3.up);
                 if (flat.sqrMagnitude > 1e-6f) forward = flat.normalized;
             }
-
-            Vector3 anchor = _ball != null ? _ball.position : transform.position;
-            // 片段自带实测站位时优先用它，保证触球帧的脚刚好落在球上
-            float stand = (_clip != null && _clip.standOffset > 0.05f) ? _clip.standOffset : _standOffset;
+            // 触球帧的脚要刚好落在球上：clip 模式用实测的髋-脚水平距离，
+            // JSON 模式优先用片段自带的 standOffset
+            float stand = _animClip != null
+                ? _clipStandOffset
+                : ((_clip != null && _clip.standOffset > 0.05f) ? _clip.standOffset : _standOffset);
             _strikePosition = anchor - forward * stand;
             _strikePosition.y = _groundY + _rootYOffset;
 
-            if (_clip != null && _clip.HasRootMotion)
+            if (UsesRootMotion)
             {
-                // 动捕自带助跑轨迹：起点直接取数据第一帧，和后面 Strike 阶段的位置连续
-                Vector2 h = _clip.SampleHip(0f);
-                _startPosition = _strikePosition + transform.rotation * new Vector3(h.x, 0f, h.y);
+                if (_animClip != null)
+                {
+                    // clip 模式：前方位移已经烘在动画的 Hips 里，外层根节点必须固定不动，
+                    // 只负责把「触球帧的髋」摆到站位点，否则会双重位移（实测角色飞出画面）
+                    _startPosition = _strikePosition
+                        - transform.rotation * new Vector3(_hipAtKick.x, 0f, _hipAtKick.y);
+                }
+                else
+                {
+                    // 动捕自带助跑轨迹：起点直接取数据第一帧，和后面 Strike 阶段的位置连续
+                    Vector2 h = SampleHipUnified(0f);
+                    _startPosition = _strikePosition + transform.rotation * new Vector3(h.x, 0f, h.y);
+                }
                 _startPosition.y = _strikePosition.y;
             }
             else
@@ -326,12 +511,13 @@ namespace PenaltyKickPlatform.Shooter
 
         private void Update()
         {
-            if (_clip == null || _phase == ShooterPhase.Idle) return;
+            if (!HasAnyClip || _phase == ShooterPhase.Idle) return;
 
             // 随挥播完后不要硬停在末帧（末帧是两臂张开的收势，定格几秒非常难看），
-            // 用 0.5 秒平滑退回自然站姿。
+            // 用 0.5 秒平滑退回自然站姿。clip 模式保留末帧即可（有随挥收势）。
             if (_phase == ShooterPhase.Done)
             {
+                if (_animClip != null) return;
                 if (_retargeter != null && _retargeter.RestBlend < 1f)
                 {
                     _retargeter.SetRestBlend(_retargeter.RestBlend + Time.deltaTime / 0.5f);
@@ -351,14 +537,19 @@ namespace PenaltyKickPlatform.Shooter
                     if (_phaseTime >= _holdBeforeRunUp)
                     {
                         // 动捕片段自带助跑，跳过程序化跑步，直接进入数据段
-                        // 从站姿切入助跑/射门：先快照站姿，避免第一帧硬切
-                        if (_retargeter != null) _retargeter.BeginTransition(0.12f);
+                        // 从站姿切入助跑/射门：JSON 模式先快照站姿避免第一帧硬切；
+                        // clip 模式首帧就是准备姿势，直接切换即可
+                        if (_animClip == null && _retargeter != null) _retargeter.BeginTransition(0.12f);
                         _phase = UsesRootMotion ? ShooterPhase.Strike : ShooterPhase.RunUp;
-                        if (UsesRootMotion && _retargeter != null)
+                        if (UsesRootMotion)
                         {
-                            // 直接进 Strike 时必须解除 rest 混合，否则整段都是站立姿势
-                            _retargeter.SetRestBlend(0f);
-                            _retargeter.SetTime(0f);
+                            if (_animClip != null) ApplyPoseAt(0f);
+                            else if (_retargeter != null)
+                            {
+                                // 直接进 Strike 时必须解除 rest 混合，否则整段都是站立姿势
+                                _retargeter.SetRestBlend(0f);
+                                _retargeter.SetTime(0f);
+                            }
                         }
                         _phaseTime = 0f;
                     }
@@ -423,11 +614,7 @@ namespace PenaltyKickPlatform.Shooter
                 {
                     if (UsesRootMotion) PlaceByRootMotion(_phaseTime);
 
-                    if (_retargeter != null)
-                    {
-                        _retargeter.SetTime(_phaseTime);
-                        _retargeter.ApplyPose();
-                    }
+                    ApplyPoseAt(_phaseTime);
 
                     if (!_kickFired && _phaseTime >= _kickTime)
                     {
@@ -438,10 +625,10 @@ namespace PenaltyKickPlatform.Shooter
                     }
 
                     // 触球后仍继续播放随挥，直到片段结束
-                    if (_phaseTime >= _clip.Duration)
+                    if (_phaseTime >= ClipDuration)
                     {
                         _phase = ShooterPhase.Done;
-                        _phaseTime = _clip.Duration;
+                        _phaseTime = ClipDuration;
                     }
                     break;
                 }
@@ -454,8 +641,10 @@ namespace PenaltyKickPlatform.Shooter
         /// </summary>
         private void PlaceByRootMotion(float t)
         {
-            if (_clip == null) return;
-            Vector2 h = _clip.SampleHip(t);
+            if (!HasAnyClip) return;
+            // clip 模式的前方位移在动画内部（Hips 曲线），外层根节点必须保持固定
+            if (_animClip != null) return;
+            Vector2 h = SampleHipUnified(t);
             Vector3 world = _strikePosition + transform.rotation * new Vector3(h.x, 0f, h.y);
             world.y = _groundY + _rootYOffset;
             transform.position = world;
@@ -463,7 +652,9 @@ namespace PenaltyKickPlatform.Shooter
 
         private void KeepFacingTarget(){
             if (_facingTarget == null) return;
-            Vector3 flat = Vector3.ProjectOnPlane(_facingTarget.position - transform.position, Vector3.up);
+            // 同 ComputeStandPositions：用球心做参考，避免依赖射手当前位置
+            Vector3 anchor = _ball != null ? _ball.position : transform.position;
+            Vector3 flat = Vector3.ProjectOnPlane(_facingTarget.position - anchor, Vector3.up);
             if (flat.sqrMagnitude < 1e-6f) return;
             // 叠一个偏航角：让射手侧身对球门（正对看起来像站军姿，也不像真实助跑）
             Quaternion look = Quaternion.LookRotation(flat.normalized, Vector3.up);
@@ -474,6 +665,14 @@ namespace PenaltyKickPlatform.Shooter
         [ContextMenu("预览：停在首帧")]
         private void PreviewFirstFrame()
         {
+            if (_animClip != null)
+            {
+                if (!_graphReady) InitClipPlayable();
+                ComputeStandPositions();
+                transform.position = _strikePosition;
+                ApplyPoseAt(0f);
+                return;
+            }
             LoadClipIfNeeded();
             ComputeStandPositions();
             transform.position = _strikePosition;
@@ -489,6 +688,14 @@ namespace PenaltyKickPlatform.Shooter
         [ContextMenu("预览：停在触球帧")]
         private void PreviewKickFrame()
         {
+            if (_animClip != null)
+            {
+                if (!_graphReady) InitClipPlayable();
+                ComputeStandPositions();
+                transform.position = _strikePosition;
+                ApplyPoseAt(_kickTime);
+                return;
+            }
             LoadClipIfNeeded();
             if (_clip == null) return;
             ComputeStandPositions();

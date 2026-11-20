@@ -54,6 +54,10 @@ namespace Assets.SuperGoalie.Scripts.Managers
         {
             base.Awake();
 
+            // 以 --wpf-host 嵌入 WPF 时，Unity 窗口常常没有焦点；
+            // 默认 runInBackground=false 会让主循环停摆，命令桥接与物理都不再推进。
+            Application.runInBackground = true;
+
             ResolveSceneReferences();
             List<string> missingReferences = GetMissingSceneReferences();
             if (missingReferences.Count > 0)
@@ -300,8 +304,7 @@ namespace Assets.SuperGoalie.Scripts.Managers
         public void StopAndResetTrajectory()
         {
             StopResetCoroutine();
-            // 丢弃尚未走到触球帧的发射，并让射手复位到待机站立
-            ShotPlaybackGate.ResetAll();
+            // ResetNow 内部会丢弃未释放的发射并让射手复位到助跑起点
             ResetNow();
             if (_trajectoryUi != null)
                 _trajectoryUi.SetStatus(_loadedTrajectory == null
@@ -430,10 +433,29 @@ namespace Assets.SuperGoalie.Scripts.Managers
         IEnumerator ResetAfterDelay(float delay)
         {
             yield return new WaitForSeconds(delay);
+
+            // 等门将把扑救动作播完（倒地 + 起身）再复位，否则会在半途被强行拽回站位。
+            // 兜底 3 秒，避免动画状态机异常时永远不复位。
+            float waited = 0f;
+            while (waited < 3f && !IsGoalKeeperIdle())
+            {
+                yield return new WaitForSeconds(0.1f);
+                waited += 0.1f;
+            }
+
             _resetCoroutine = null;
             ResetNow();
             if (_trajectoryUi != null)
                 _trajectoryUi.SetStatus("已回到轨迹起点，可以再次播放。 ");
+        }
+
+        /// <summary>门将是否已经播完动作、回到待机站立</summary>
+        bool IsGoalKeeperIdle()
+        {
+            if (_goalKeeper == null || _goalKeeper.Animator == null)
+                return true;
+
+            return _goalKeeper.Animator.GetCurrentAnimatorStateInfo(0).IsName("Idle");
         }
 
         void ResetNow()
@@ -450,6 +472,8 @@ namespace Assets.SuperGoalie.Scripts.Managers
                 _ball.Position = _ball.RootPositionForCenter(_originalBallCenter);
             }
 
+            // 自动复位同样要把射手带回助跑起点，否则只有手动「停止」才会复位射手
+            ShotPlaybackGate.ResetAll();
             ResetGoalKeeper();
             _goal.GoalTrigger.gameObject.SetActive(true);
 
