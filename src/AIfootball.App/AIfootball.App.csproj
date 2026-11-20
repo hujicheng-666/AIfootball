@@ -70,9 +70,24 @@
           SkipUnchangedFiles="true" />
   </Target>
 
+  <Target Name="CheckWebUi" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('..\AIfootball.Web\dist\index.html')"
+           Text="Web UI is missing. Restore src/AIfootball.Web/dist or run npm ci and npm run build in src/AIfootball.Web." />
+  </Target>
+
+  <Target Name="PublishWebUi" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <PublishedWebUi Include="..\AIfootball.Web\dist\**\*" />
+      <ResolvedFileToPublish Include="@(PublishedWebUi)">
+        <RelativePath>web\%(PublishedWebUi.RecursiveDir)%(PublishedWebUi.Filename)%(PublishedWebUi.Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
   <!-- 嵌入 Python 引擎到输出目录 -->
   <ItemGroup>
-    <Content Include="..\AIfootball.Engine\aifootball\**\*" Link="python_engine\aifootball\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\AIfootball.Engine\aifootball\**\*" Exclude="..\AIfootball.Engine\aifootball\**\__pycache__\**" Link="python_engine\aifootball\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="..\AIfootball.Engine\requirements.txt" Link="python_engine\requirements.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

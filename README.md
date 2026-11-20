@@ -19,55 +19,66 @@ Windows 桌面应用：左右双目视频 → YOLO11 检测 → 三维三角化 
 
 ## 快速开始
 
-要求：Windows 10/11 x64、.NET 8 SDK。**不需要**另装 Python、PyTorch、YOLO 或 Unity——
-运行环境与 Unity 播放器都已随仓库分发。
+支持 Windows 10 x64（内部版本 19041 及以上）和 Windows 11 x64。运行需要
+[WebView2 Evergreen Runtime](https://developer.microsoft.com/microsoft-edge/webview2/#download)
+和 [Visual C++ x64 运行库](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)。
 
-### 1. 克隆（必须带 LFS）
+### 1. 克隆并下载资源
 
-```powershell
-git lfs install          # 只需一次
-git clone https://github.com/hujicheng-666/AIfootball.git
-cd AIfootball
-```
-
-仓库含 `python_env\`（内嵌 Python + torch + ultralytics，约 1.6GB）与 `runtime\`
-（Unity 播放器，约 486MB），都走 Git LFS。**没有 `git lfs` 会拿到一堆指针文件，
-启动时会报找不到 `python_env\python.exe`。**
-
-### 2. 编译
+使用带 Git LFS 的 [Git for Windows](https://gitforwindows.org/)。建议使用如 `D:\AIfootball` 的短路径。
 
 ```powershell
-dotnet build src\AIfootball.sln -c Release   # 只构建 WPF App（单体版）
+git lfs install
+git clone -c core.longpaths=true --branch Striker_Model https://github.com/hujicheng-666/AIfootball.git D:\AIfootball
+Set-Location D:\AIfootball
 ```
 
-> 前端产物 `src\AIfootball.Web\dist` 已入库（主界面由 WebView2 加载它）。
-> **改了 `src\AIfootball.Web` 的 React 源码后必须重建并提交**，否则跑的还是旧的 dist：
->
-> ```powershell
-> cd src\AIfootball.Web; npm install; npm run build   # 需要 Node 18+
-> ```
->
-> 只改 C# 则无需 Node，dist 现成可用。
+Unity 播放器和部分资源通过 LFS 分发。若因网络中断留下了指针文件，在仓库根目录运行
+`git lfs pull`。需要切换一个已经正常检出的仓库时，先 `git fetch origin`，再运行
+`git switch --track origin/Striker_Model`（已有本地同名分支时用 `git switch Striker_Model`）。
 
-### 3. 运行
+旧提交曾跟踪 `python_env\`。如果检出旧提交时出现路径过长，短路径和
+`core.longpaths=true` 可以让 Git 完成检出。若 `git status` 将几乎所有文件列为已暂存删除，
+说明检出曾中断。保留原目录中的本地文件，然后在另一短路径重新克隆，再迁移需要的本地改动。
 
-```text
-src\AIfootball.App\bin\Release\net8.0-windows10.0.19041.0\win-x64\AIfootball.exe
+### 2. 编译与开发运行
+
+安装 x64 .NET 8 SDK 和 .NET 8 Desktop Runtime。先还原 NuGet 依赖并运行应用。
+
+```powershell
+dotnet build src\AIfootball.sln -c Release
+dotnet run --project src\AIfootball.App\AIfootball.App.csproj -c Release --no-build
 ```
 
-> 路径注意**没有** `x64` 这一段。若用 `-p:Platform=x64` 构建，产物会落在
-> `bin\x64\Release\...`。两个目录会同时存在，混用很容易启动到旧的一份——
-> 改完代码后按构建时间确认一下 exe 的时间戳。
+WebView2 使用已入库的 `src\AIfootball.Web\dist`。修改 React 源码后，在
+`src\AIfootball.Web` 下执行 `npm ci` 和 `npm run build`，并提交更新后的 dist。
 
-首次启动会自动定位工作区根目录（从 exe 向上找 `python_env\`），无需配置。
-`runtime\` 里的 Unity 播放器由 WPF 拉起，用于三维回放；它不能由 `dotnet build`
-生成，所以必须来自仓库（见 `runtime\`）。
+首次启动时，在界面点击「一键安装环境」。应用联网创建
+`%LOCALAPPDATA%\AIfootball\Python310`，验证 PyTorch、YOLO、OpenCV 和 SciPy。
+检测到可用的 NVIDIA 驱动时会尝试 CUDA，初始化失败时自动使用 CPU。
+如果要单独测试 CPU 安装，设置 `AIFOOTBALL_CPU_ONLY=1` 并用 `AIFOOTBALL_PYTHON_ENV`
+指定一个新的可写目录，再从同一个终端启动应用。
+
+### 3. 给另一台电脑使用
+
+```powershell
+.\scripts\build_release.bat
+```
+
+复制整个 `dist\AIfootball-Portable-v3.0` 目录到目标电脑的可写位置，再运行其中的
+`AIfootball.exe`。便携包已包含 .NET、Unity 播放器、YOLO 模型和三组带配套标定的双目样例。
+首次安装 Python 依赖需要联网。自己的相机和场地需要重新标定。
+
+需要安装向导时，在构建电脑装好 [Inno Setup](https://jrsoftware.org/inno-setup/downloads) 6.3 或以上，
+运行 `.\installer\build_installer.bat`，产物在 `dist\installer`。
+安装向导默认安装到当前用户的可写目录，并检测 WebView2 和 Visual C++ 运行库。
+安装缺失的 Visual C++ 运行库时需要管理员批准。
 
 ### 目录角色
 
 | 目录 | 是否入库 | 说明 |
 | --- | --- | --- |
-| `python_env\` | 是（LFS） | 内嵌 Python 3.10 + torch/cv2/ultralytics，开箱即用 |
+| `%LOCALAPPDATA%\AIfootball\Python310` | 否 | 当前用户首次运行时安装的 Python 推理环境 |
 | `runtime\` | 是（LFS） | Unity 播放器（`Myproject.exe` + `Myproject_Data`），`dotnet build` 不生成 |
 | `calib\` | 是 | 双目标定四件套，检测链路必需；换场地需重新标定 |
 | `data\goalkeepers\` | 是 | 门将属性 JSON，UI 列表与 `evaluate` 依赖 |
@@ -81,10 +92,11 @@ src\AIfootball.App\bin\Release\net8.0-windows10.0.19041.0\win-x64\AIfootball.exe
 ## 自检与测试
 
 ```powershell
-# Python 引擎（137 个用例）
-python_env\python.exe -m unittest discover -s tests/engine -t .
+$python = Join-Path $env:LOCALAPPDATA 'AIfootball\Python310\python.exe'
+# Python 引擎
+& $python -c "import sys, unittest; sys.path.insert(0, r'src\AIfootball.Engine'); unittest.main(module=None, argv=['unittest','discover','-s','tests/engine','-t','.'])"
 
-# C# 领域层（89 个用例；已不在上面的 sln 里，单独构建）
+# C# 领域层测试
 dotnet test tests\AIfootball.Core.Tests\AIfootball.Core.Tests.csproj
 ```
 
@@ -92,10 +104,10 @@ dotnet test tests\AIfootball.Core.Tests\AIfootball.Core.Tests.csproj
 
 ```powershell
 # 快速门禁：27 脚射门，扑救率必须落在 18%–30%
-python_env\python.exe -m aifootball evaluate --shots 27 --observation on --expect-save-rate 0.18 0.30
+& $python src\AIfootball.Engine\aifootball\__main__.py evaluate --shots 27 --observation on --expect-save-rate 0.18 0.30
 
 # 最终验收：162 脚 5×3 网格，同时校验方向准确率 55%–75%（约 20 分钟）
-python_env\python.exe -m aifootball evaluate --shots 162 --columns 5 --observation on --noise 0.80 --expect-save-rate 0.18 0.30 --expect-direction 0.55 0.75
+& $python src\AIfootball.Engine\aifootball\__main__.py evaluate --shots 162 --columns 5 --observation on --noise 0.80 --expect-save-rate 0.18 0.30 --expect-direction 0.55 0.75
 ```
 
 `evaluate` 是**唯一客观的"手感"口径**：`--observation off` 还原改动前的全知门将（对照臂），
@@ -112,8 +124,8 @@ python_env\python.exe -m aifootball evaluate --shots 162 --columns 5 --observati
 用 3DSP 的 3D 骨骼序列做"现有视角能不能提前看出射门方向"的可行性验证（纯 CPU，不需要相机/Unity）：
 
 ```powershell
-python_env\python.exe -m aifootball pose inspect          # 数据勘察（秒级，不加载 torch）
-python_env\python.exe -m aifootball pose run --out output\pose\final   # 三组实验 + 诊断（约 7 分钟）
+& $python src\AIfootball.Engine\aifootball\__main__.py pose inspect          # 数据勘察（秒级，不加载 torch）
+& $python src\AIfootball.Engine\aifootball\__main__.py pose run --out output\pose\final   # 三组实验 + 诊断（约 7 分钟）
 ```
 
 实测结论（详见 [docs/HANDOVER.md](docs/HANDOVER.md) §16，报告在 `output\pose\final\pose-report.md`）：

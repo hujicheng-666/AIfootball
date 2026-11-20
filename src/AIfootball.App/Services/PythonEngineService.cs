@@ -19,7 +19,6 @@ public class PythonEngineService : IPythonEngine
     private static readonly TimeSpan SelfCheckTtl = TimeSpan.FromSeconds(60);
 
     private readonly string _baseDir;
-    private readonly string _pythonEnvDir;
     private readonly string _pythonExe;
 
     // 正在运行的 Python 子进程：应用退出时要把它们一起结束，
@@ -30,8 +29,15 @@ public class PythonEngineService : IPythonEngine
     public PythonEngineService(string baseDir)
     {
         _baseDir = baseDir;
-        _pythonEnvDir = Path.Combine(baseDir, "python_env");
-        _pythonExe = Path.Combine(_pythonEnvDir, "python.exe");
+        _pythonExe = Path.Combine(ResolveEnvironmentDirectory(), "python.exe");
+    }
+
+    internal static string ResolveEnvironmentDirectory()
+    {
+        var configured = Environment.GetEnvironmentVariable("AIFOOTBALL_PYTHON_ENV");
+        return string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AIfootball", "Python310")
+            : Path.GetFullPath(configured);
     }
 
     public string PythonExePath => _pythonExe;

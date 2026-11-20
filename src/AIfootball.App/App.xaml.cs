@@ -4,6 +4,7 @@ using System.Windows;
 using AIfootball.App.Services;
 using AIfootball.App.Services.Interfaces;
 using AIfootball.App.ViewModels;
+using AIfootball.Core.Workspace;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AIfootball.App;
@@ -98,7 +99,7 @@ public partial class App : Application
 
     private static string ResolveBaseDirectory()
     {
-        // 优先级: 命令行 > 当前目录 > 向上搜索项目根
+        // 显式工作区优先。发布包从自身目录启动，开发构建从 exe 向上定位源码。
         var args = Environment.GetCommandLineArgs();
         for (int i = 0; i < args.Length - 1; i++)
         {
@@ -106,31 +107,8 @@ public partial class App : Application
                 return Path.GetFullPath(args[i + 1]);
         }
 
-        // 检查当前目录
-        var cwd = Directory.GetCurrentDirectory();
-        if (HasProjectFiles(cwd)) return cwd;
-
-        // 从 exe 目录向上搜索，直到找到 calib/ 或 python_env/
-        var exeDir = AppDomain.CurrentDomain.BaseDirectory;
-        var dir = exeDir;
-        while (dir != null)
-        {
-            if (HasProjectFiles(dir)) return dir;
-            // 也检查子目录 AIfootball-Windows
-            var legacyDir = Path.Combine(dir, "AIfootball-Windows");
-            if (Directory.Exists(legacyDir) && HasProjectFiles(legacyDir))
-                return legacyDir;
-            var parent = Path.GetDirectoryName(dir);
-            if (parent == dir) break; // 到达根目录
-            dir = parent;
-        }
-
-        return exeDir;
+        return AifootballWorkspace.Resolve(anchorDirectory: AppContext.BaseDirectory).Root;
     }
-
-    private static bool HasProjectFiles(string dir) =>
-        Directory.Exists(Path.Combine(dir, "calib")) ||
-        Directory.Exists(Path.Combine(dir, "python_env"));
 
     protected override void OnExit(ExitEventArgs e)
     {

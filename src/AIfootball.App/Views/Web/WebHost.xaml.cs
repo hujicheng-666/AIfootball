@@ -91,6 +91,11 @@ public partial class WebHost : UserControl
             var dev = Environment.GetEnvironmentVariable("AIFOOTBALL_WEB_DEV");
             core.Navigate(string.IsNullOrWhiteSpace(dev) ? "https://app.local/index.html" : dev);
         }
+        catch (WebView2RuntimeNotFoundException)
+        {
+            ShowBootError("缺少 Microsoft Edge WebView2 Runtime",
+                "请安装 Microsoft Edge WebView2 Evergreen Runtime，然后重新打开 AIfootball。");
+        }
         catch (Exception ex)
         {
             ShowBootError("界面加载失败", ex.Message);

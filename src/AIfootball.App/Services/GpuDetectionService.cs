@@ -61,9 +61,7 @@ public class GpuDetectionService : IGpuDetectionService
 
             using var proc = Process.Start(psi);
             if (proc == null) return "";
-            string output = proc.StandardOutput.ReadToEnd().Trim();
-            proc.WaitForExit(5000);
-            return proc.ExitCode == 0 ? output : "";
+            return ReadCommandOutput(proc);
         }
         catch { return ""; }
     }
@@ -90,7 +88,19 @@ public class GpuDetectionService : IGpuDetectionService
             }
         };
         proc.Start();
-        proc.WaitForExit(5000);
-        return proc.StandardOutput.ReadToEnd().Trim();
+        return ReadCommandOutput(proc);
+    }
+
+    private static string ReadCommandOutput(Process process)
+    {
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(5000))
+        {
+            process.Kill(entireProcessTree: true);
+            return "";
+        }
+        Task.WhenAll(stdout, stderr).GetAwaiter().GetResult();
+        return process.ExitCode == 0 ? stdout.GetAwaiter().GetResult().Trim() : "";
     }
 }

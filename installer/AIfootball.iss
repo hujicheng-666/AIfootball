@@ -1,4 +1,4 @@
-; AIfootball complete Windows installer.
+﻿; AIfootball complete Windows installer.
 ; Run scripts\build_release.bat before compiling this script.
 
 #define AppName "AIfootball"
@@ -12,16 +12,18 @@ AppId={{D3F3F8C2-1B4A-4B18-8EC4-610FB7C87086}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
-DefaultDirName={autopf}\{#AppName}
+DefaultDirName={localappdata}\Programs\{#AppName}
+UsePreviousAppDir=no
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist\installer
 OutputBaseFilename=AIfootball-Setup-{#AppVersion}-x64
-Compression=lzma2/ultra64
+Compression=lzma2
 SolidCompression=yes
-ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
-PrivilegesRequired=admin
+ArchitecturesAllowed=x64os
+ArchitecturesInstallIn64BitMode=x64os
+MinVersion=10.0.19041
+PrivilegesRequired=lowest
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#AppExeName}
 SetupLogging=yes
@@ -29,7 +31,11 @@ SetupLogging=yes
 SetupIconFile=..\assets\icons\AIfootball.ico
 
 [Languages]
+#if FileExists(CompilerPath + "Languages\ChineseSimplified.isl")
 Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+#else
+Name: "english"; MessagesFile: "compiler:Default.isl"
+#endif
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
@@ -50,7 +56,7 @@ Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait
 Root: HKCU; Subkey: "Software\AIfootball"; Flags: uninsdeletekeyifempty
 
 [UninstallDelete]
-; 首次运行自动生成的 Python 环境（体积较大）
+; 旧版在应用目录中生成的环境
 Name: "{app}\python_env"; Type: filesandordirs
 ; 分析结果目录
 Name: "{app}\output"; Type: filesandordirs
@@ -64,13 +70,49 @@ Name: "{app}\data\penalty_*_trajectory.csv"; Type: files
 Name: "{app}\python_engine\aifootball\__pycache__"; Type: filesandordirs
 
 [Code]
-function InitializeSetup(): Boolean;
+const
+  WebViewKey = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  VcRuntimeKey = 'Software\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
+
+function HasWebView2(RootKey: Integer): Boolean;
+var
+  Version: String;
 begin
-  if not IsWin64 then begin
-    MsgBox('AIfootball 需要 64 位 Windows 10 或 Windows 11。', mbError, MB_OK);
-    Result := False;
-  end else
-    Result := True;
+  Result := RegQueryStringValue(RootKey, WebViewKey, 'pv', Version) and
+    (Version <> '') and (Version <> '0.0.0.0');
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ExitCode: Integer;
+  Installed: Cardinal;
+begin
+  Result := '';
+  try
+    if not (HasWebView2(HKLM32) or HasWebView2(HKCU)) then begin
+      DownloadTemporaryFile('https://go.microsoft.com/fwlink/p/?LinkId=2124703',
+        'MicrosoftEdgeWebview2Setup.exe', '', nil);
+      if not Exec(ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe'), '/silent /install',
+        '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+        RaiseException('无法启动 Microsoft Edge WebView2 Runtime 安装程序。');
+      if not (HasWebView2(HKLM32) or HasWebView2(HKCU)) then
+        RaiseException(Format('WebView2 安装失败（%d）。请安装 Evergreen Runtime 后重试。', [ExitCode]));
+    end;
+
+    if not (RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Installed', Installed) and (Installed = 1)) then begin
+      DownloadTemporaryFile('https://aka.ms/vc14/vc_redist.x64.exe', 'vc_redist.x64.exe', '', nil);
+      if not ShellExec('runas', ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart',
+        '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
+        RaiseException('无法启动 Visual C++ x64 运行库安装程序。请安装运行库后重试。');
+      if ExitCode = 3010 then begin
+        NeedsRestart := True;
+        Result := '请重启 Windows 以完成 Visual C++ 运行库安装，然后继续安装 AIfootball。';
+      end else if not (RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Installed', Installed) and (Installed = 1)) then
+        RaiseException(Format('Visual C++ x64 运行库安装失败（%d）。', [ExitCode]));
+    end;
+  except
+    Result := GetExceptionMessage;
+  end;
 end;
 
 function InitializeUninstall(): Boolean;
