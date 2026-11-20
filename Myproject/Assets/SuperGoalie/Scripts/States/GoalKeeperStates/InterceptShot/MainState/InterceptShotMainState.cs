@@ -57,6 +57,15 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
         float _diveSpeed = 1f;
         bool _diveStarted;
 
+        // 起跳后的水平推进：动画的根位移只取垂直分量（用于腾空与落地），
+        // 水平位移由这里按 ease-out 推进到拦截点——起跳瞬间爆发、接触前收住，
+        // 不会像匀速平移那样在地上滑。
+        Vector3 _interceptPoint;
+        Vector3 _diveStartPos;
+        float _diveElapsed;
+        float _diveDuration = 0.5f;
+        float _diveMoveSpeed = 3f;
+
         public string DiveState { get { return _diveState; } }
         public GKDiveTiming.Dive DiveInfo { get { return _dive; } }
 
@@ -139,6 +148,9 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
             _playerSteeringTarget.y = Owner.Position.y;
             _orthogonalPointToPlayerPositionOnBallPath = _playerSteeringTarget;
 
+            _interceptPoint = goalLineCenter + goalRight * targetLateral + goalForward * forwardOffset;
+            _interceptPoint.y = Owner.Position.y;
+
             float movementDistance = Vector3.ProjectOnPlane(_playerSteeringTarget - Owner.Position, Vector3.up).magnitude;
             float effectiveDiveSpeed = Owner.DiveSpeed * keepingScale * probabilityScale;
             float playerRawDiveSpeed = movementDistance / Mathf.Max(_timeOfBallToPlayerOrthogonalPointOnBallPath, Time.fixedDeltaTime);
@@ -215,8 +227,17 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
             }
             else
             {
-                // 起跳后水平位移交给动画根骨骼，代码不再平移，避免滑行
-                Owner.RPGMovement.SetSteeringOff();
+                // 起跳后：垂直交给动画 root motion，水平按 ease-out 推到拦截点。
+                // 直接用 deltaPosition.xz 会因为动作自带 3–4 米的斜向位移而冲过头。
+                _diveElapsed += Time.deltaTime;
+                float progress = Mathf.Clamp01(_diveElapsed / _diveDuration);
+                float eased = 1f - (1f - progress) * (1f - progress);
+                Vector3 moveTarget = Vector3.Lerp(_diveStartPos, _interceptPoint, eased);
+                moveTarget.y = Owner.Position.y;
+
+                Owner.RPGMovement.SetMoveTarget(moveTarget);
+                Owner.RPGMovement.Speed = _diveMoveSpeed;
+                Owner.RPGMovement.SetSteeringOn();
             }
 
             Owner.RPGMovement.SetRotateFacePosition(Owner.Ball.Position);
@@ -311,16 +332,15 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
         {
             base.OnAnimatorMove();
 
-            //calculate the ratio to ball point
-            float ratio = Mathf.Clamp01(
-                (_timeOfBallToPlayerOrthogonalPointOnBallPathCached - _timeOfBallToPlayerOrthogonalPointOnBallPath)
-                / Mathf.Max(_timeOfBallToPlayerOrthogonalPointOnBallPathCached, 0.001f));
+            // 垂直位移交给动画的 root motion。
+            // 原来这里用 RequiredJumpHeight 手动 lerp，只会把人往上抬，
+            // 永远不会下沉——扑地动作就变成横在空中。开启 applyRootMotion 后，
+            // deltaPosition.y 才是真实的起跳/倒地/起身高度变化。
+            if (!_diveStarted)
+                return;
 
-            //manipulate the player height
-            float positionY = Mathf.Lerp(0f, RequiredJumpHeight, ratio);
-
-            //now move the player character depending on the height
-            Vector3 localPosition = new Vector3(Owner.ModelRoot.transform.localPosition.x, positionY, Owner.ModelRoot.transform.localPosition.z);
+            Vector3 localPosition = Owner.ModelRoot.transform.localPosition;
+            localPosition.y += Owner.Animator.deltaPosition.y;
             Owner.ModelRoot.transform.localPosition = localPosition;
         }
 
@@ -369,7 +389,14 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
                 return;
 
             _diveStarted = true;
-            Owner.RPGMovement.SetSteeringOff();
+            _diveStartPos = Owner.Position;
+            _diveElapsed = 0f;
+
+            // 起跳到接触的这段就是水平推进的可用时间
+            _diveDuration = Mathf.Max(_dive.ContactNorm * _dive.Length / Mathf.Max(_diveSpeed, 0.01f), 0.15f);
+            float travelLeft = Vector3.ProjectOnPlane(_interceptPoint - _diveStartPos, Vector3.up).magnitude;
+            _diveMoveSpeed = Mathf.Clamp(travelLeft / _diveDuration * 1.6f, 2.2f, 9f);
+
             Owner.Animator.speed = _diveSpeed;
             Owner.Animator.CrossFade(_diveState, 0.10f, 0, 0f);
 

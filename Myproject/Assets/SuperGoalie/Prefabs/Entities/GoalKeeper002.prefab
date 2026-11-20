@@ -880,6 +880,7 @@ GameObject:
   m_Component:
   - component: {fileID: 5874117975852298546}
   - component: {fileID: 7499761382476225034}
+  - component: {fileID: 7721095310208216502}
   m_Layer: 0
   m_Name: GKMixamo
   m_TagString: Untagged
@@ -917,7 +918,7 @@ Animator:
   m_Controller: {fileID: 9100000, guid: f0d194129aa59a54bbb6e4f6bf7b0349, type: 2}
   m_CullingMode: 0
   m_UpdateMode: 0
-  m_ApplyRootMotion: 0
+  m_ApplyRootMotion: 1
   m_LinearVelocityBlending: 0
   m_StabilizeFeet: 0
   m_WarningMessage: 
@@ -925,6 +926,19 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
+--- !u!114 &7721095310208216502
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8216154474692394113}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a3110b323f10fa24c91c2967a9518a66, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  Owner: {fileID: 114561778951593898}
 --- !u!1 &8282890219571013868
 GameObject:
   m_ObjectHideFlags: 0

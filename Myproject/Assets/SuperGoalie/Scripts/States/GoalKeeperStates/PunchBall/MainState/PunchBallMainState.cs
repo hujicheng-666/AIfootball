@@ -59,6 +59,13 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
             Action temp = Owner.OnPunchBall;
             if (temp != null)
                 temp.Invoke();
+
+            if (Owner.Goal != null)
+            {
+                float lateral = Vector3.Dot(Owner.Position - Owner.Goal.CsvCoordinateOrigin, Owner.Goal.PitchRight);
+                Debug.Log(string.Format("[GKContact] lateral={0:F2}m modelY={1:F2} remain={2:F2}s",
+                    lateral, Owner.ModelRoot.localPosition.y, _remainAnimTime));
+            }
         }
 
         public override void Execute()
@@ -152,15 +159,12 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
         {
             base.OnAnimatorMove();
 
-            // 接触后从腾空高度落回地面。原来是直接写 Vector3.zero，
-            // 等于把人在一帧内从半空砸到地上，非常突兀。
+            // 倒地与起身的高度变化同样来自 root motion。
+            // 之前这里把高度强行压向 0，但真正的问题是 root motion 被整体丢弃，
+            // 人既不下降也不横移——现在交给动画自己给高度。
             Vector3 localPosition = Owner.ModelRoot.transform.localPosition;
-            if (Mathf.Abs(localPosition.y) > 0.001f)
-            {
-                float fallSpeed = Mathf.Max(3.5f, _startY * 4f);
-                localPosition.y = Mathf.MoveTowards(localPosition.y, 0f, fallSpeed * Time.deltaTime);
-                Owner.ModelRoot.transform.localPosition = localPosition;
-            }
+            localPosition.y += Owner.Animator.deltaPosition.y;
+            Owner.ModelRoot.transform.localPosition = localPosition;
         }
 
         float GetWorldBallRadius()
