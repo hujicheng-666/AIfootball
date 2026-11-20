@@ -104,13 +104,9 @@ public class GKMixamoControllerBuilder
         foreach (var c in Cells)
         {
             var st = sm.states[i2of(sm, c.state)].state;
-            // 待机 -> 该格：由 Dive 触发器 + 代码 CrossFade 双重保障
-            var tIn = stTend.AddTransition(st);
-            tIn.hasExitTime = false;
-            tIn.duration = 0.10f;
-            tIn.hasFixedDuration = true;
-
-            // 该格 -> 待机：Exit 触发器
+            // 这里刻意不建 TendGoal -> 扑救格 的转移。
+            // 那批转移没有条件，只要进入 TendGoal 就会立刻被弹到第一个扑救格，
+            // 门将站着也在抽。扑救格统一由代码 CrossFade 进入，不靠转移。
             AddT(st, stIdle, "Exit", 0.30f, false, 0f);
         }
 

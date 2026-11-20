@@ -45,6 +45,21 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
 
         float _effectiveReach;
 
+        // ── 扑救动作的时间对齐 ────────────────────────────────────────────
+        // 每个扑救动作全长 2.5–3.5 秒，手碰到球只在 18%–30% 处，之后是倒地与起身。
+        // 所以不能等球到点才起播，而要反推「接触帧应该落在球到达的时刻」：
+        //   contactLead = 接触点 × 动作时长        （起跳到碰球要多久）
+        //   delay       = 球到点时间 − contactLead （原地准备多久再蹬地）
+        // 若球太快（delay < 0），则原地起跳并加速播放，让接触帧仍压在球的到达时刻。
+        string _diveState;
+        GKDiveTiming.Dive _dive;
+        float _diveDelay;
+        float _diveSpeed = 1f;
+        bool _diveStarted;
+
+        public string DiveState { get { return _diveState; } }
+        public GKDiveTiming.Dive DiveInfo { get { return _dive; } }
+
         public override void Enter()
         {
             base.Enter();
@@ -90,8 +105,6 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
                 currentLateral + maxDiveTravel);
 
             float forwardOffset = Mathf.Clamp(0.70f + Owner.TendGoalDistance * 0.30f, 1.05f, 1.75f);
-            _playerSteeringTarget = goalLineCenter + goalRight * desiredLateral + goalForward * forwardOffset;
-            _playerSteeringTarget.y = Owner.Position.y;
 
             float distanceToIntercept = Vector3.Distance(Owner.Ball.CenterPosition, Owner.BallHitTarget);
             float currentBallSpeed = Mathf.Max(Owner.Ball.Velocity.magnitude, Owner.BallVelocity, 0.1f);
@@ -99,12 +112,6 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
                 Mathf.Clamp(distanceToIntercept / currentBallSpeed, 0.12f, 1.20f);
             _ballPositionAtPlayerOrthogonalPoint = Owner.Ball.FuturePosition(_timeOfBallToPlayerOrthogonalPointOnBallPath);
             _relativeBallPositionAtPlayerInterceptPoint = Owner.transform.InverseTransformPoint(_ballPositionAtPlayerOrthogonalPoint);
-            _orthogonalPointToPlayerPositionOnBallPath = _playerSteeringTarget;
-
-            float movementDistance = Vector3.ProjectOnPlane(_playerSteeringTarget - Owner.Position, Vector3.up).magnitude;
-            float effectiveDiveSpeed = Owner.DiveSpeed * keepingScale * probabilityScale;
-            float playerRawDiveSpeed = movementDistance / Mathf.Max(_timeOfBallToPlayerOrthogonalPointOnBallPath, Time.fixedDeltaTime);
-            float playerDiveSpeed = Mathf.Clamp(playerRawDiveSpeed, Owner.TendGoalSpeed * 0.85f, effectiveDiveSpeed * 1.25f);
 
             float normalizedTargetHeight = Mathf.Clamp01(ballAtGoalLocal.y / Mathf.Max(0.1f, goalHeight));
             float heightBoost = Mathf.Lerp(0.75f, 1.20f, Mathf.Clamp01((heightPreference + 1f) * 0.5f));
@@ -117,6 +124,46 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
             else
                 _turn = lateralDelta > 0f ? 1f : -1f;
 
+            _height = normalizedTargetHeight;
+
+            // 按「高度档 + 左右 + 需要横移多少」挑动作：各格动作自带的横向覆盖差很多
+            //（0.24–2.01 m），拿 2 米的侧扑去接近角，人一定扑过头，看起来就假。
+            _diveState = GKDiveTiming.SelectState(_turn, _height, Mathf.Abs(lateralDelta));
+            _dive = GKDiveTiming.Get(_diveState);
+
+            // 起跳点：动作自己会横向带出 _dive.LateralTravel 米，所以先走到
+            //「目标点 − 动作自带位移」的位置。起跳后位移全程交给动画，
+            // 代码不再平移，避免「代码平移 + 骨骼横移」叠加成滑行。
+            float jumpLateral = targetLateral - _turn * Mathf.Min(_dive.LateralTravel, Mathf.Abs(lateralDelta));
+            _playerSteeringTarget = goalLineCenter + goalRight * jumpLateral + goalForward * forwardOffset;
+            _playerSteeringTarget.y = Owner.Position.y;
+            _orthogonalPointToPlayerPositionOnBallPath = _playerSteeringTarget;
+
+            float movementDistance = Vector3.ProjectOnPlane(_playerSteeringTarget - Owner.Position, Vector3.up).magnitude;
+            float effectiveDiveSpeed = Owner.DiveSpeed * keepingScale * probabilityScale;
+            float playerRawDiveSpeed = movementDistance / Mathf.Max(_timeOfBallToPlayerOrthogonalPointOnBallPath, Time.fixedDeltaTime);
+            float playerDiveSpeed = Mathf.Clamp(playerRawDiveSpeed, Owner.TendGoalSpeed * 0.85f, effectiveDiveSpeed * 1.25f);
+
+            // 接触帧对齐：让「手伸到最远」的那一帧正好落在球到达的时刻
+            float contactLead = _dive.ContactNorm * _dive.Length;
+            float tContact = _timeOfBallToPlayerOrthogonalPointOnBallPath;
+            if (tContact >= contactLead)
+            {
+                _diveDelay = tContact - contactLead;
+                _diveSpeed = 1f;
+            }
+            else
+            {
+                // 球太快，来不及从容起跳：立刻蹬地，并把播放速度提上去，
+                // 让接触帧仍然压在球到达的那一刻，而不是球都过人了才开始飞。
+                _diveDelay = 0f;
+                _diveSpeed = Mathf.Clamp(contactLead / Mathf.Max(tContact, 0.08f), 1f, 2.4f);
+            }
+
+            // 原地准备阶段要赶到起跳点，横移速度按剩余时间反推
+            if (_diveDelay > 0.02f && movementDistance > 0.05f)
+                playerDiveSpeed = Mathf.Clamp(movementDistance / _diveDelay, playerDiveSpeed, Owner.DiveSpeed * 1.6f);
+
             Owner.RPGMovement.SetMoveTarget(_playerSteeringTarget);
             Owner.RPGMovement.Speed = playerDiveSpeed;
             Owner.RPGMovement.CurrentSpeed = Mathf.Max(Owner.RPGMovement.CurrentSpeed, playerDiveSpeed * 0.45f);
@@ -124,15 +171,14 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
             Owner.RPGMovement.SetTrackingOn();
             Owner.RPGMovement.SetRotateFacePosition(Owner.Ball.Position);
 
-            _height = Mathf.Clamp01(ballAtGoalLocal.y / Mathf.Max(0.1f, goalHeight));
             Owner.Animator.SetFloat("Height", _height);
             Owner.Animator.SetFloat("Turn", _turn);
 
-            // 9 格直选：每格是一条独立动作（低/中/高 × 左/中/右），不做 2D 插值。
-            // 这些动作来源不同、时长不同，混合会互相污染，因此按落点最近格直接 CrossFade。
-            string diveState = SelectDiveState(_turn, _height);
-            Owner.Animator.CrossFade(diveState, 0.10f, 0);
-            Debug.Log($"[GKDecision] goalLocal={ballAtGoalLocal} goalHeight={goalHeight:F2} => Height={_height:F2} Turn={_turn:F2} lateralDelta={lateralDelta:F2} reach={_effectiveReach:F2} state={diveState}");
+            _diveStarted = _diveDelay <= 0f;
+            if (_diveStarted)
+                StartDive();
+
+            Debug.Log($"[GKDecision] goalLocal={ballAtGoalLocal} Height={_height:F2} Turn={_turn:F2} need={Mathf.Abs(lateralDelta):F2}m => {_diveState} delay={_diveDelay:F2}s speed={_diveSpeed:F2}");
 
             LeftHandTargetPosition = GetBoneIKTarget(HumanBodyBones.LeftHand);
             RightHandTargetPosition = GetBoneIKTarget(HumanBodyBones.RightHand);
@@ -144,21 +190,36 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
             _normalizedBallPosition = Owner.Ball.CenterPosition;
             _normalizedPlayerPosition = new Vector3(Owner.Position.x, 0f, Owner.Position.z);
 
-            float distanceToMoveTarget = Vector3.ProjectOnPlane(_playerSteeringTarget - Owner.Position, Vector3.up).magnitude;
-            if (distanceToMoveTarget > 0.08f)
+            if (!_diveStarted)
             {
-                Owner.RPGMovement.SetMoveTarget(_playerSteeringTarget);
-                Owner.RPGMovement.SetSteeringOn();
+                // 起跳前的原地准备：继续移动到起跳点，播的是站位/横移动作
+                _diveDelay -= Time.deltaTime;
+
+                float distanceToMoveTarget = Vector3.ProjectOnPlane(_playerSteeringTarget - Owner.Position, Vector3.up).magnitude;
+                if (distanceToMoveTarget > 0.08f)
+                {
+                    Owner.RPGMovement.SetMoveTarget(_playerSteeringTarget);
+                    Owner.RPGMovement.SetSteeringOn();
+                }
+                else
+                {
+                    Owner.RPGMovement.SetSteeringOff();
+                }
+
+                Vector3 relVelocity = Owner.transform.InverseTransformDirection(Owner.RPGMovement.Velocity);
+                Owner.Animator.SetFloat("Forward", Mathf.Clamp(relVelocity.z, -1f, 1f), 0.08f, 0.08f);
+                Owner.Animator.SetFloat("Turn", _turn, 0.08f, 0.08f);
+
+                if (_diveDelay <= 0f)
+                    StartDive();
             }
             else
             {
+                // 起跳后水平位移交给动画根骨骼，代码不再平移，避免滑行
                 Owner.RPGMovement.SetSteeringOff();
             }
-            Owner.RPGMovement.SetRotateFacePosition(Owner.Ball.Position);
 
-            Vector3 relativeVelocity = Owner.transform.InverseTransformDirection(Owner.RPGMovement.Velocity);
-            Owner.Animator.SetFloat("Forward", Mathf.Clamp(relativeVelocity.z, -1f, 1f), 0.08f, 0.08f);
-            Owner.Animator.SetFloat("Turn", _turn, 0.08f, 0.08f);
+            Owner.RPGMovement.SetRotateFacePosition(Owner.Ball.Position);
 
             float frameDist = GetDistanceTravelledInSingleFrame(Owner.Ball.Velocity);
             float catchThreshold = Owner.Ball.WorldRadius + 0.11f + frameDist * 0.25f;
@@ -187,6 +248,9 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
             //set the steering to off
             Owner.RPGMovement.SetSteeringOff();
             Owner.RPGMovement.SetTrackingOff();
+
+            // 播放速度会被扑救阶段改动，退出时复位
+            Owner.Animator.speed = 1f;
 
             //set the animator to exit the dive state
             Owner.Animator.ResetTrigger("Dive");
@@ -296,14 +360,21 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
         }
 
         /// <summary>
-        /// 9 格直选：把落点归到最近的格子，返回对应的动画状态名。
-        /// 高度分档：&lt;0.25 低（贴地球），0.25–0.60 中（胸腹），&gt;0.60 高（头以上）。
+        /// 蹬地起跳：切到选定的扑救格，并按对齐算好的倍速播放。
+        /// 起跳之后代码不再干预水平位移，横向幅度由动作本身负责。
         /// </summary>
-        string SelectDiveState(float turn, float height)
+        void StartDive()
         {
-            string side = turn < -0.01f ? "Left" : (turn > 0.01f ? "Right" : "Center");
-            string band = height < 0.25f ? "Low" : (height < 0.60f ? "Mid" : "High");
-            return "Punch_" + band + "_" + side;
+            if (_diveStarted)
+                return;
+
+            _diveStarted = true;
+            Owner.RPGMovement.SetSteeringOff();
+            Owner.Animator.speed = _diveSpeed;
+            Owner.Animator.CrossFade(_diveState, 0.10f, 0, 0f);
+
+            Debug.Log(string.Format("[GKDive] {0} speed={1:F2} contactLead={2:F2}s travel={3:F2}m",
+                _diveState, _diveSpeed, _dive.ContactNorm * _dive.Length, _dive.LateralTravel));
         }
 
         GoalKeeper Owner
