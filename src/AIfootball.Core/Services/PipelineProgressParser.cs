@@ -78,6 +78,9 @@ public sealed partial class PipelineProgressParser(IReadOnlyList<string> samples
         if (body.Contains("检测足球", StringComparison.Ordinal) || body.Contains("相机分配", StringComparison.Ordinal))
             return Emit(PipelineStage.Reconstruct, StageState.Running, $"正在重建 {sample}", sample);
 
+        if (body.StartsWith("正在进行双目时间对齐", StringComparison.Ordinal))
+            return new PipelineProgressEvent(PipelineStage.Reconstruct, StageState.Running, text, sample, Ratio, 1);
+
         if (body.Contains("Raw 3D point count", StringComparison.Ordinal) || body.Contains("Filtered 3D point count", StringComparison.Ordinal))
             return Complete(PipelineStage.Reconstruct, sample, $"{sample} 三维重建完成");
 

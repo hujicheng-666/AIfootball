@@ -1477,8 +1477,8 @@ public partial class GoalkeeperPage : UserControl
                     return;
                 }
 
-                var args = $"--video \"{path}\" --workspace \"{engine.WorkspaceDir}\"";
-                var (exitCode, _, error) = await engine.RunAsync(script, args, 600000);
+                var (exitCode, _, error) = await engine.RunAsync(
+                    script, ["--video", path, "--workspace", engine.WorkspaceDir], 600000);
                 if (exitCode != 0)
                 {
                     AppLogger.Write("WARN", $"时间轴缩略图生成失败：{error.Trim()}");
@@ -1564,8 +1564,8 @@ public partial class GoalkeeperPage : UserControl
         TrainerProgressText.Text = "正在扫脚次（按镜头切换，约 30 秒，每段视频只扫一次）…";
         try
         {
-            var args = $"--video \"{path}\" --workspace \"{engine.WorkspaceDir}\"";
-            var (exitCode, _, error) = await engine.RunAsync(script, args, 600000);
+            var (exitCode, _, error) = await engine.RunAsync(
+                script, ["--video", path, "--workspace", engine.WorkspaceDir], 600000);
             if (exitCode != 0)
             {
                 _vm?.AddLog("warn", $"脚次扫描失败：{error.Trim()}");

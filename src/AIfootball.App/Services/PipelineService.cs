@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using AIfootball.App.Models;
@@ -203,22 +204,20 @@ public class PipelineService : IPipelineService
         string? goalkeeperName, IProgress<(string, string)>? logProgress,
         CancellationToken cancellation)
     {
-        var samples = string.Join(" ", sampleNames.Select(n => $"\"{n}\""));
-        var skip = "";
-        if (skipReconstruct) skip += " --skip-reconstruct";
-        if (skipBallistic) skip += " --skip-ballistic";
-
-        var scriptPath = _engine.EngineEntryPath;
-        var args = $"offline --samples {samples} {skip} --workspace \"{_engine.WorkspaceDir}\"";
+        var args = new List<string> { "offline", "--samples" };
+        args.AddRange(sampleNames);
+        if (skipReconstruct) args.Add("--skip-reconstruct");
+        if (skipBallistic) args.Add("--skip-ballistic");
+        args.AddRange(["--workspace", _engine.WorkspaceDir]);
 
         logProgress?.Report(("开始离线处理...", "info"));
 
-        var (code, output, error) = await _engine.RunAsync(
+        var (code, _, _) = await _engine.RunAsync(
             // Video reconstruction duration depends on clip length and CPU/GPU
             // throughput.  It must be cancellable by the user, but must not be
             // killed by an arbitrary batch-wide wall-clock limit before later
             // samples reach the ballistic/export stages.
-            scriptPath, args, timeoutMs: Timeout.Infinite, cancellation: cancellation,
+            _engine.EngineEntryPath, args, timeoutMs: Timeout.Infinite, cancellation: cancellation,
             outputReceived: line => logProgress?.Report((line, "output")),
             errorReceived: line => logProgress?.Report((line, "error")));
 
@@ -296,10 +295,10 @@ public class PipelineService : IPipelineService
             ? $"开始在线录制(手机/网络相机): 左={camLeft} 右={camRight}..."
             : $"开始在线录制(USB 相机): 左={camLeft} 右={camRight}...", "info"));
 
-        var (code, output, error) = await _engine.RunAsync(
+        var (code, _, _) = await _engine.RunAsync(
             _engine.EngineEntryPath,
-            $"online --cam-left \"{camLeft}\" --cam-right \"{camRight}\" --sample \"{sampleName}\" " +
-            $"--workspace \"{_engine.WorkspaceDir}\"",
+            ["online", "--cam-left", camLeft, "--cam-right", camRight, "--sample", sampleName,
+                "--workspace", _engine.WorkspaceDir],
             // 预览 + 录制由用户自己控制时长，不能用一个固定墙钟时间把它掐掉
             timeoutMs: Timeout.Infinite,
             cancellation: cancellation,
@@ -321,10 +320,10 @@ public class PipelineService : IPipelineService
             ? $"开始边录制边分析(手机/网络相机): 左={camLeft} 右={camRight}..."
             : $"开始边录制边分析(USB 相机): 左={camLeft} 右={camRight}...", "info"));
 
-        var (code, output, error) = await _engine.RunAsync(
+        var (code, _, _) = await _engine.RunAsync(
             _engine.EngineEntryPath,
-            $"online-live --cam-left \"{camLeft}\" --cam-right \"{camRight}\" " +
-            $"--sample \"{sampleName}\" --workspace \"{_engine.WorkspaceDir}\"",
+            ["online-live", "--cam-left", camLeft, "--cam-right", camRight, "--sample", sampleName,
+                "--workspace", _engine.WorkspaceDir],
             // 预览停留多久、分析录多久都由用户决定，这里不设墙钟上限
             timeoutMs: Timeout.Infinite,
             cancellation: cancellation,
@@ -340,8 +339,8 @@ public class PipelineService : IPipelineService
     {
         var (code, output, error) = await _engine.RunAsync(
             _engine.EngineEntryPath,
-            $"teststream --source \"{url}\" --timeout {timeoutSeconds} " +
-            $"--workspace \"{_engine.WorkspaceDir}\"",
+            ["teststream", "--source", url, "--timeout", timeoutSeconds.ToString(CultureInfo.InvariantCulture),
+                "--workspace", _engine.WorkspaceDir],
             timeoutMs: (timeoutSeconds + 30) * 1000);
 
         var msg = (output ?? "").Trim();
@@ -358,9 +357,7 @@ public class PipelineService : IPipelineService
             return _cachedCameras;
 
         var (code, output, _) = await _engine.RunAsync(
-            "-c",
-            "\"from aifootball.capture.dual_camera import DualCameraRecorder; " +
-            "print(','.join(str(c) for c in DualCameraRecorder.list_cameras()))\"");
+            _engine.EngineEntryPath, ["list-cameras", "--workspace", _engine.WorkspaceDir]);
 
         var cameras = (code != 0 || string.IsNullOrWhiteSpace(output))
             ? new List<int>()
@@ -378,7 +375,7 @@ public class PipelineService : IPipelineService
         nint hostWindowHandle = 0)
     {
         var exe = FindUnityExe();
-        if (exe == null)
+        if (exe == null || sampleNames.Count == 0)
         {
             Debug.WriteLine("[Unity] 未找到 Unity 可执行文件");
             return null;
@@ -423,21 +420,22 @@ public class PipelineService : IPipelineService
             // This preserves its native input routing and dynamic render resolution.
             argList.AddRange(["-popupwindow", "-screen-fullscreen", "0", "--wpf-host"]);
             var commandFile = Path.Combine(_engine.WorkspaceDir, "runtime", "data", "wpf-unity-command.txt");
-            argList.AddRange(["--wpf-command", $"\"{commandFile}\""]);
+            argList.AddRange(["--wpf-command", commandFile]);
             if (hostWindowHandle != 0)
                 argList.AddRange(["-parentHWND", hostWindowHandle.ToString(), "delayed"]);
         }
-        argList.AddRange(["--csv", $"\"{csvPath}\""]);
+        argList.AddRange(["--csv", csvPath]);
 
         if (!string.IsNullOrEmpty(goalkeeperName))
         {
             var gkPath = Path.Combine(_engine.WorkspaceDir, "data", "goalkeepers",
                 $"{goalkeeperName}.json");
             if (File.Exists(gkPath))
-                argList.Add($"--goalkeeper \"{gkPath}\"");
+                argList.AddRange(["--goalkeeper", gkPath]);
         }
 
-        startInfo.Arguments = string.Join(" ", argList);
+        foreach (var argument in argList)
+            startInfo.ArgumentList.Add(argument);
 
         try
         {
@@ -507,10 +505,11 @@ public class PipelineService : IPipelineService
         CancellationToken cancellation = default)
     {
         logProgress?.Report(("开始视频内参标定...", "info"));
-        var args = $"calibrate-intrinsics --left \"{leftVideo}\" --right \"{rightVideo}\" " +
-                   $"--calib \"{calibDir}\" --workspace \"{_engine.WorkspaceDir}\"";
         var (code, _, _) = await _engine.RunAsync(
-            _engine.EngineEntryPath, args, timeoutMs: 3600000, cancellation: cancellation,
+            _engine.EngineEntryPath,
+            ["calibrate-intrinsics", "--left", leftVideo, "--right", rightVideo,
+                "--calib", calibDir, "--workspace", _engine.WorkspaceDir],
+            timeoutMs: 3600000, cancellation: cancellation,
             outputReceived: line => logProgress?.Report((line, "output")),
             errorReceived: line => logProgress?.Report((line, "error")));
         return code == 0;
@@ -524,11 +523,12 @@ public class PipelineService : IPipelineService
         logProgress?.Report(("开始外参标定（注意弹出的参考点点击窗口）...", "info"));
         var intrinsicsLeft = Path.Combine(calibDir, "intrinsics_left.npz");
         var intrinsicsRight = Path.Combine(calibDir, "intrinsics_right.npz");
-        var args = $"calibrate-extrinsics --left-image \"{leftImage}\" --right-image \"{rightImage}\" " +
-                   $"--intrinsics-left \"{intrinsicsLeft}\" --intrinsics-right \"{intrinsicsRight}\" " +
-                   $"--calib \"{calibDir}\" --workspace \"{_engine.WorkspaceDir}\"";
         var (code, _, _) = await _engine.RunAsync(
-            _engine.EngineEntryPath, args, timeoutMs: 600000, cancellation: cancellation,
+            _engine.EngineEntryPath,
+            ["calibrate-extrinsics", "--left-image", leftImage, "--right-image", rightImage,
+                "--intrinsics-left", intrinsicsLeft, "--intrinsics-right", intrinsicsRight,
+                "--calib", calibDir, "--workspace", _engine.WorkspaceDir],
+            timeoutMs: 600000, cancellation: cancellation,
             outputReceived: line => logProgress?.Report((line, "output")),
             errorReceived: line => logProgress?.Report((line, "error")));
         return code == 0;

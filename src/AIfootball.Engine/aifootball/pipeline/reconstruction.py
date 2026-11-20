@@ -2448,6 +2448,7 @@ def process_sample(sample_dir, camera_configs, model, imgsz, conf, model_path=No
     if "left" not in tracks_by_name or "right" not in tracks_by_name:
         raise RuntimeError("当前样例未能匹配到 left/right 两个相机视角。")
 
+    print(f"[{sample_dir.name}] 正在进行双目时间对齐与三角化…", flush=True)
     trajectory = build_3d_trajectory(
         tracks_by_name["left"],
         configs_by_name["left"],

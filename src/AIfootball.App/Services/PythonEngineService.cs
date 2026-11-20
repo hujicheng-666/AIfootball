@@ -64,7 +64,7 @@ public class PythonEngineService : IPythonEngine
     public string EngineEntryPath => Path.Combine(EngineDir, "aifootball", "__main__.py");
 
     public async Task<(int ExitCode, string Output, string Error)> RunAsync(
-        string script, string arguments = "", int timeoutMs = 300000,
+        string script, IReadOnlyList<string> arguments, int timeoutMs = 300000,
         CancellationToken cancellation = default,
         Action<string>? outputReceived = null,
         Action<string>? errorReceived = null,
@@ -73,7 +73,6 @@ public class PythonEngineService : IPythonEngine
         var psi = new ProcessStartInfo
         {
             FileName = _pythonExe,
-            Arguments = $"-u \"{script}\" {arguments}",
             WorkingDirectory = _baseDir,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -85,6 +84,10 @@ public class PythonEngineService : IPythonEngine
             StandardOutputEncoding = System.Text.Encoding.UTF8,
             StandardErrorEncoding = System.Text.Encoding.UTF8,
         };
+        psi.ArgumentList.Add("-u");
+        psi.ArgumentList.Add(script);
+        foreach (var argument in arguments)
+            psi.ArgumentList.Add(argument);
 
         // 设置环境变量
         psi.Environment["PYTHONUNBUFFERED"] = "1";
@@ -200,7 +203,7 @@ public class PythonEngineService : IPythonEngine
 
         var (code, output, error) = await RunAsync(
             EngineEntryPath,
-            $"selfcheck --workspace \"{_baseDir}\"",
+            ["selfcheck", "--workspace", _baseDir],
             SelfCheckTimeoutMs);
 
         if (code != 0)

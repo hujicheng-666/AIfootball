@@ -27,7 +27,7 @@ public interface IPythonEngine
     /// </param>
     Task<(int ExitCode, string Output, string Error)> RunAsync(
         string script,
-        string arguments = "",
+        IReadOnlyList<string> arguments,
         int timeoutMs = 300000,
         CancellationToken cancellation = default,
         Action<string>? outputReceived = null,

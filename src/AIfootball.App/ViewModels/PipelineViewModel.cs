@@ -422,9 +422,13 @@ public class PipelineViewModel : ViewModelBase
 
         _mainVm.AddLog("info", $"======== 离线处理 {targetSamples.Count} 个样本 ========");
 
+        string? stageFailure = null;
         var progress = new Progress<(string Message, string Level)>(p =>
         {
             _mainVm.AddLog(p.Level, p.Message);
+            var message = p.Message.TrimStart();
+            if (message.StartsWith("失败:", StringComparison.Ordinal))
+                stageFailure ??= message["失败:".Length..].Trim();
             HandleLogLine(p.Message);
         });
 
@@ -444,7 +448,9 @@ public class PipelineViewModel : ViewModelBase
             }
             else
             {
-                ProcessingProgressText = _cts.IsCancellationRequested ? "处理已中止" : "处理失败，详情见 logs/";
+                ProcessingProgressText = _cts.IsCancellationRequested ? "处理已中止"
+                    : stageFailure is { Length: > 0 } ? $"处理失败：{stageFailure}"
+                    : "处理失败，详情见 logs/";
                 _mainVm.SetPipelineState(-1, "处理失败");
             }
             _mainVm.AddLog(success ? "success" : "error",

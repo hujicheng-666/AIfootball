@@ -99,6 +99,21 @@ public sealed class PipelineProgressParserTests
     }
 
     [Fact]
+    public void Consume_TriangulationKeepsReconstructionRunning()
+    {
+        var parser = CreateParser("sample1");
+        parser.Consume("[1/3] 3D 重建: 1 个样本");
+
+        var progress = parser.Consume("[sample1] 正在进行双目时间对齐与三角化…");
+
+        Assert.NotNull(progress);
+        Assert.Equal(PipelineStage.Reconstruct, progress.Stage);
+        Assert.Equal(StageState.Running, progress.State);
+        Assert.Equal(1.0, progress.SampleFraction);
+        Assert.Equal(0, parser.CompletedUnits);
+    }
+
+    [Fact]
     public void Consume_BallisticCompletionIsIdempotent()
     {
         var parser = CreateParser("sample1");
