@@ -391,7 +391,8 @@ public class PipelineViewModel : ViewModelBase
     {
         if (!_mainVm.IsEnvironmentReady)
         {
-            _mainVm.AddLog("warn", "Python 环境未就绪，请先在仪表盘点击「一键安装环境」");
+            ProcessingProgressText = "Python 环境未就绪，请先安装或等待自检完成";
+            _mainVm.AddLog("warn", ProcessingProgressText);
             return;
         }
 
@@ -405,7 +406,8 @@ public class PipelineViewModel : ViewModelBase
 
         if (targetSamples.Count == 0)
         {
-            _mainVm.AddLog("warn", "没有可处理的样本");
+            ProcessingProgressText = "没有可处理的样本";
+            _mainVm.AddLog("warn", ProcessingProgressText);
             return;
         }
 
@@ -441,7 +443,10 @@ public class PipelineViewModel : ViewModelBase
                 _mainVm.SetPipelineState(5, "处理完成");
             }
             else
+            {
+                ProcessingProgressText = _cts.IsCancellationRequested ? "处理已中止" : "处理失败，详情见 logs/";
                 _mainVm.SetPipelineState(-1, "处理失败");
+            }
             _mainVm.AddLog(success ? "success" : "error",
                 success ? "======== 全部完成 ========" : "======== 处理失败 ========");
             await _mainVm.RefreshListsAsync();
@@ -449,6 +454,7 @@ public class PipelineViewModel : ViewModelBase
         catch (Exception ex)
         {
             CompleteRemainingSteps(false);
+            ProcessingProgressText = $"处理失败：{ex.Message}";
             _mainVm.SetPipelineState(-1, "处理异常");
             _mainVm.AddLog("error", "流水线异常: " + ex.Message);
         }

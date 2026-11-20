@@ -47,6 +47,13 @@ public class MainViewModel : ViewModelBase, IDisposable
         set => SetProperty(ref _isEnvironmentReady, value);
     }
 
+    private bool _isCheckingEnvironment = true;
+    public bool IsCheckingEnvironment
+    {
+        get => _isCheckingEnvironment;
+        private set => SetProperty(ref _isCheckingEnvironment, value);
+    }
+
     private string _envStatusText = "正在检测计算环境…";
     public string EnvStatusText
     {
@@ -232,13 +239,16 @@ public class MainViewModel : ViewModelBase, IDisposable
 
             if (IsEnvironmentReady)
             {
-                await SetReadyStateAsync();
+                await SetReadyStateAsync(check!.Cuda);
             }
             else
             {
-                AddLog("warn", $"⚠ Python 推理环境: 未就绪（缺少 {check?.MissingSummary() ?? "python_env"}）");
-                AddLog("info", "   → 请点击「一键安装环境」自动配置");
-                EnvStatusText = "首次运行：Python 推理环境未安装";
+                EnvStatusText = check is not null
+                    ? $"Python 依赖不齐全（{check.MissingSummary()}）"
+                    : File.Exists(_pythonEngine.PythonExePath)
+                        ? "Python 自检未通过，可重新安装推理环境"
+                        : "请安装 Python 推理环境";
+                AddLog("warn", $"{EnvStatusText}。解释器路径：{_pythonEngine.PythonExePath}");
                 StatusBarText = "环境未就绪 — 点击「一键安装环境」";
                 SetupProgressVisible = false;
             }
@@ -247,6 +257,10 @@ public class MainViewModel : ViewModelBase, IDisposable
         {
             AddLog("error", $"✗ 环境检测失败: {ex.Message}");
             EnvStatusText = $"异常：{ex.Message}";
+        }
+        finally
+        {
+            IsCheckingEnvironment = false;
         }
 
         // 2. 无论环境是否就绪，检测 GPU
@@ -309,19 +323,18 @@ public class MainViewModel : ViewModelBase, IDisposable
         AddLog("info", "═══════ 自检完成 ═══════");
     }
 
-    private async Task SetReadyStateAsync()
+    private async Task SetReadyStateAsync(bool cuda)
     {
         IsEnvironmentReady = true;
         EnvStatusText = "Python 环境就绪";
         SetupProgressVisible = false;
-        IsSettingUp = false;
 
         // 检测 GPU
         GpuInfo = await _gpuService.DetectAsync();
         CalibrationStatus = _pipelineService.GetCalibrationStatus();
 
-        if (GpuInfo is { CudaAvailable: true })
-            StatusBarText = $"NVIDIA CUDA 推理: {GpuInfo.GpuName}";
+        if (cuda)
+            StatusBarText = $"NVIDIA CUDA 推理: {GpuInfo?.GpuName}";
         else if (GpuInfo is { HasDedicatedGpu: true })
             StatusBarText = $"独立显卡 / CPU 兼容推理: {GpuInfo.AdapterNames}";
         else
@@ -469,17 +482,19 @@ public class MainViewModel : ViewModelBase, IDisposable
 
     private async Task OnSetupEnvironment()
     {
-        if (IsSettingUp) return;
+        if (IsCheckingEnvironment || IsSettingUp || IsEnvironmentReady) return;
 
         IsSettingUp = true;
         SetupProgressVisible = true;
         SetupProgress = 0;
+        EnvStatusText = "正在准备 Python 推理环境…";
 
         var progress = new Progress<(string Status, int Percent)>(p =>
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
-                EnvStatusText = p.Status;
+                if (p.Percent != -2)
+                    EnvStatusText = p.Status;
                 // -2 = pip 实时输出，不更新进度条
                 if (p.Percent >= 0)
                     SetupProgress = p.Percent;
@@ -492,15 +507,15 @@ public class MainViewModel : ViewModelBase, IDisposable
 
         try
         {
-            var success = await _environmentService.SetupAsync(progress);
-            if (success)
-                await SetReadyStateAsync();
-            else
-            {
-                EnvStatusText = "安装失败，详情见 logs/";
-                SetupProgressVisible = false;
-                IsSettingUp = false;
-            }
+            if (!await _environmentService.SetupAsync(progress))
+                return;
+
+            EnvStatusText = "正在检查已安装的推理环境…";
+            var check = await _pythonEngine.RunSelfCheckAsync(force: true);
+            if (check is not { HasCoreDependencies: true })
+                throw new InvalidOperationException($"安装后的 Python 引擎自检失败。{check?.MissingSummary()}");
+
+            await SetReadyStateAsync(check.Cuda);
         }
         catch (Exception ex)
         {
@@ -508,6 +523,9 @@ public class MainViewModel : ViewModelBase, IDisposable
             if (ex.InnerException != null)
                 AddLog("error", $"   内部错误: {ex.InnerException.Message}");
             EnvStatusText = $"安装失败：{ex.Message}";
+        }
+        finally
+        {
             SetupProgressVisible = false;
             IsSettingUp = false;
         }

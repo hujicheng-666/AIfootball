@@ -19,6 +19,15 @@ public partial class MainWindow : Window
         InitializeComponent();
         _mainVm = mainVm;
         _pipelineVm = pipelineVm;
+        _mainVm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(MainViewModel.IsEnvironmentReady)
+                or nameof(MainViewModel.IsCheckingEnvironment)
+                or nameof(MainViewModel.IsSettingUp)
+                or nameof(MainViewModel.StatusBarText)
+                or nameof(MainViewModel.GpuInfo))
+                UpdateStatusIndicators();
+        };
 
         // 设置页面 DataContext
         // 概览 / 处理队列 / 相机标定三页已由 WebView2 承载，
@@ -60,9 +69,14 @@ public partial class MainWindow : Window
                 NavigateTo("pipeline");
                 break;
 
+            case "environment.setup":
+                _mainVm.SetupEnvironmentCommand.Execute(null);
+                break;
+
             // ── 处理队列 ──
             case "pipeline.runOffline":
-                _pipelineVm.RunOfflineCommand.Execute(null);
+                if (_pipelineVm.RunOfflineCommand.CanExecute(null))
+                    _pipelineVm.RunOfflineCommand.Execute(null);
                 break;
             case "pipeline.runOnline":
                 _pipelineVm.RunOnlineCommand.Execute(null);
@@ -255,8 +269,11 @@ public partial class MainWindow : Window
     private async Task InitializeAsync()
     {
         await _mainVm.InitializeAsync();
+        UpdateStatusIndicators();
+    }
 
-        // 更新环境状态指示器
+    private void UpdateStatusIndicators()
+    {
         if (_mainVm.IsEnvironmentReady)
         {
             EnvStatusDot.Fill = (System.Windows.Media.Brush)
@@ -267,7 +284,9 @@ public partial class MainWindow : Window
         {
             EnvStatusDot.Fill = (System.Windows.Media.Brush)
                 FindResource("WarningBrush");
-            EnvStatusLabel.Text = "需要设置";
+            EnvStatusLabel.Text = _mainVm.IsSettingUp ? "安装环境中…"
+                : _mainVm.IsCheckingEnvironment ? "正在检查"
+                : "需要设置";
         }
 
         // 更新状态栏

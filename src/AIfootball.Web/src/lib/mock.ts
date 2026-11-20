@@ -45,7 +45,7 @@ export const mockState: AppState = {
     radarValues: [0.62, 0.71, 0.34, 0.48, 0.29],
     emptyText: "",
   },
-  env: { ready: true, statusText: "Python 环境就绪", settingUp: false, setupProgress: 0 },
+  env: { ready: true, checking: false, statusText: "Python 环境就绪", settingUp: false, setupProgress: 0 },
   gpu: {
     name: "NVIDIA GeForce RTX 4060 Laptop GPU",
     cudaAvailable: true,

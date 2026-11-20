@@ -86,7 +86,7 @@ export type FormState = {
 };
 
 export type AppState = {
-  env: { ready: boolean; statusText: string; settingUp: boolean; setupProgress: number };
+  env: { ready: boolean; checking: boolean; statusText: string; settingUp: boolean; setupProgress: number };
   gpu: { name: string; cudaAvailable: boolean; dedicated: boolean; cudaVersion: string };
   calibration: CalibrationState;
   pipeline: { stage: number; statusText: string };

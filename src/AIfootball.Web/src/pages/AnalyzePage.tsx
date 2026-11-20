@@ -1,6 +1,7 @@
 import type { AppState, RunStep } from "../lib/bridge";
 import { runCommand } from "../lib/bridge";
 import { Radar } from "../components/Radar";
+import { EnvironmentSetup } from "../components/EnvironmentSetup";
 
 const stepIcon: Record<RunStep["status"], string> = {
   pending: "○",
@@ -23,7 +24,7 @@ const stepLabel: Record<RunStep["status"], string> = {
  * 单页内完成「样本选择 → 参数配置 → 执行监控」。
  */
 export function AnalyzePage({ state }: { state: AppState }) {
-  const { run, form, samples, goalkeepers } = state;
+  const { env, run, form, samples, goalkeepers } = state;
   const selected = form.samples.filter((s) => s.selected).map((s) => s.name);
   const selectedSet = new Set(selected);
 
@@ -204,16 +205,20 @@ export function AnalyzePage({ state }: { state: AppState }) {
                 <button
                   className="btn primary"
                   onClick={() => runCommand("pipeline.runOffline")}
-                  disabled={run.running}
+                  disabled={run.running || !env.ready || total === 0}
                 >
                   启动分析
                 </button>
+                <EnvironmentSetup env={env} />
                 {run.running && (
                   <button className="btn danger" onClick={() => runCommand("pipeline.cancel")}>
                     中止
                   </button>
                 )}
               </div>
+              {!env.ready && (
+                <div className="notice warn" role="status">{env.statusText || "请先安装 Python 推理环境"}</div>
+              )}
             </div>
 
             <div className="sect grow">

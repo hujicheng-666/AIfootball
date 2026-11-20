@@ -1,5 +1,6 @@
 import type { AppState, RunStep } from "../lib/bridge";
 import { navigate, runCommand } from "../lib/bridge";
+import { EnvironmentSetup } from "../components/EnvironmentSetup";
 
 const stepMark: Record<RunStep["status"], string> = {
   pending: "○",
@@ -138,7 +139,7 @@ export function WorkbenchPage({ state }: { state: AppState }) {
                 <span className="calib-k">计算环境</span>
                 <span className="calib-v">{env.statusText || "未检测"}</span>
                 <span className={env.ready ? "calib-ok" : "calib-no"}>
-                  {env.ready ? "通过" : "异常"}
+                  {env.ready ? "通过" : env.checking ? "检查中" : env.settingUp ? "安装中" : "未就绪"}
                 </span>
               </div>
               <div className="calib-row">
@@ -162,6 +163,7 @@ export function WorkbenchPage({ state }: { state: AppState }) {
 
               <div className="foot-actions">
                 <div className="actions" style={{ marginTop: 0 }}>
+                  <EnvironmentSetup env={env} />
                   {!calibration.ready && (
                     <button className="btn" onClick={() => navigate("settings")}>
                       执行标定

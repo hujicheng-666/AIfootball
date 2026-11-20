@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { AppState, CalibrationState, Keeper } from "../lib/bridge";
 import { runCommand } from "../lib/bridge";
+import { EnvironmentSetup } from "../components/EnvironmentSetup";
 
 function FileField({
   label,
@@ -425,7 +426,7 @@ function EnvPanel({ state }: { state: AppState }) {
             <span className="calib-k">状态</span>
             <span className="calib-v">{env.statusText || "未检测"}</span>
             <span className={env.ready ? "calib-ok" : "calib-no"}>
-              {env.ready ? "通过" : "异常"}
+              {env.ready ? "通过" : env.checking ? "检查中" : env.settingUp ? "安装中" : "未就绪"}
             </span>
           </div>
           <div className="calib-row">
@@ -435,9 +436,11 @@ function EnvPanel({ state }: { state: AppState }) {
               {calibration.extrinsics ? "外参已生成" : "外参未生成"}
             </span>
           </div>
-          <div className="hint" style={{ marginTop: 10 }}>
-            自检命令 aifootball selfcheck，结论与命令行一致。
-          </div>
+          {!env.ready && !env.checking && (
+            <div className="actions">
+              <EnvironmentSetup env={env} />
+            </div>
+          )}
         </div>
       </section>
 

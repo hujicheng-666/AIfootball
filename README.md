@@ -53,7 +53,8 @@ dotnet run --project src\AIfootball.App\AIfootball.App.csproj -c Release --no-bu
 WebView2 使用已入库的 `src\AIfootball.Web\dist`。修改 React 源码后，在
 `src\AIfootball.Web` 下执行 `npm ci` 和 `npm run build`，并提交更新后的 dist。
 
-首次启动时，在界面点击「一键安装环境」。应用联网创建
+首次启动时，可在「工作台」「分析」或「设置 → 环境诊断」点击「一键安装环境」。状态显示为
+「Python 环境就绪」后即可分析样例。应用联网创建
 `%LOCALAPPDATA%\AIfootball\Python310`，验证 PyTorch、YOLO、OpenCV 和 SciPy。
 检测到可用的 NVIDIA 驱动时会尝试 CUDA，初始化失败时自动使用 CPU。
 如果要单独测试 CPU 安装，设置 `AIFOOTBALL_CPU_ONLY=1` 并用 `AIFOOTBALL_PYTHON_ENV`

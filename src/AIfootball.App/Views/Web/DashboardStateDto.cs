@@ -28,6 +28,7 @@ public sealed class DashboardStateDto
 public sealed class EnvDto
 {
     public bool Ready { get; init; }
+    public bool Checking { get; init; }
     public string StatusText { get; init; } = "";
     public bool SettingUp { get; init; }
     public int SetupProgress { get; init; }
@@ -193,6 +194,7 @@ public static class DashboardStateBuilder
             Env = new EnvDto
             {
                 Ready = vm.IsEnvironmentReady,
+                Checking = vm.IsCheckingEnvironment,
                 StatusText = vm.EnvStatusText,
                 SettingUp = vm.IsSettingUp,
                 SetupProgress = vm.SetupProgress,
