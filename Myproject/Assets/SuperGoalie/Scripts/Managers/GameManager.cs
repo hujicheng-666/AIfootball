@@ -1,7 +1,6 @@
 using Assets.SuperGoalie.Scripts.Data;
 using Assets.SuperGoalie.Scripts.Entities;
 using Assets.SuperGoalie.Scripts.Platform;
-using Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Idle.MainState;
 using Assets.SuperGoalie.Scripts.Trajectories;
 using Patterns.Singleton;
 using System;
@@ -246,15 +245,11 @@ namespace Assets.SuperGoalie.Scripts.Managers
         {
             try
             {
+                BallTrajectory trajectory = CsvTrajectoryLoader.Load(path, _goal);
+                ValidatePenaltyStart(trajectory);
                 StopResetCoroutine();
-                _loadedTrajectory = CsvTrajectoryLoader.Load(path, _goal);
-                ValidatePenaltyStart(_loadedTrajectory);
-                _shotInProgress = false;
-
-                _ball.Rotation = _originalBallRotation;
-                _ball.HoldAtCenter(_loadedTrajectory.InitialCenter);
-                ResetGoalKeeper();
-                _goal.GoalTrigger.gameObject.SetActive(true);
+                _loadedTrajectory = trajectory;
+                ResetNow();
 
                 message = string.Format("已载入 {0} 个轨迹点，总时长 {1:0.000} 秒。",
                     _loadedTrajectory.SampleCount, _loadedTrajectory.Duration);
@@ -262,7 +257,6 @@ namespace Assets.SuperGoalie.Scripts.Managers
             }
             catch (Exception exception)
             {
-                _loadedTrajectory = null;
                 message = "载入失败：" + exception.Message;
                 return false;
             }
@@ -279,17 +273,15 @@ namespace Assets.SuperGoalie.Scripts.Managers
             try
             {
                 StopResetCoroutine();
-                ResetGoalKeeper();
+                ResetNow();
                 _goalKeeper.PrepareForShot();
-                _goal.GoalTrigger.ResetForNewShot();
-                _goal.GoalTrigger.gameObject.SetActive(true);
 
                 // 经闸门发出：若场景中存在射手（ShooterPlaybackBinder），会先播放助跑与摆腿，
                 // 触球那一刻球才飞出；没有射手时行为与改动前完全一致。
                 BallTrajectory trajectoryToPlay = _loadedTrajectory;
                 Vector3 goalkeeperTarget = trajectoryToPlay.FindClosestCenter(_goal.CsvCoordinateOrigin);
-                ShotPlaybackGate.Request(() => _ball.PlayTrajectory(trajectoryToPlay, goalkeeperTarget));
                 _shotInProgress = true;
+                ShotPlaybackGate.Request(() => _ball.PlayTrajectory(trajectoryToPlay, goalkeeperTarget));
                 message = "正在按 CSV 轨迹播放；守门员触球后将切换为物理运动。";
                 return true;
             }
@@ -389,8 +381,8 @@ namespace Assets.SuperGoalie.Scripts.Managers
 
         void Instance_OnBallCollidedWithGoal()
         {
-            // 如果球已被扑出，不算进球
-            if (_goalKeeper != null && _goalKeeper.SaveAttemptSuccess) return;
+            // 独立界面的回放由 PenaltyKickApp 自行收尾。
+            if (!_shotInProgress || (_goalKeeper != null && _goalKeeper.SaveAttemptSuccess)) return;
 
             ++_score;
             if (_scoreText != null)
@@ -401,20 +393,19 @@ namespace Assets.SuperGoalie.Scripts.Managers
                 _trajectoryUi.SetStatus("进球！即将回到轨迹起点。 ");
             }
 
-            ScheduleReset(2f);
+            ScheduleReset();
         }
 
         void Instance_OnTrajectoryCompleted()
         {
             if (!_shotInProgress) return;
-            _shotInProgress = false;
-            ScheduleReset(2f);
+            ScheduleReset();
         }
 
         void Instance_OnTrajectoryReleased()
         {
             if (!_shotInProgress) return;
-            ScheduleReset(4f);
+            ScheduleReset();
         }
 
         /// <summary>直接显示状态文字</summary>
@@ -424,38 +415,22 @@ namespace Assets.SuperGoalie.Scripts.Managers
                 _trajectoryUi.SetStatus(msg);
         }
 
-        void ScheduleReset(float delay)
+        void ScheduleReset()
         {
-            StopResetCoroutine();
-            _resetCoroutine = StartCoroutine(ResetAfterDelay(delay));
+            if (_resetCoroutine != null) return;
+            _goalKeeper.FinishReplayAttempt();
+            _resetCoroutine = StartCoroutine(ResetAfterRecovery());
         }
 
-        IEnumerator ResetAfterDelay(float delay)
+        IEnumerator ResetAfterRecovery()
         {
-            yield return new WaitForSeconds(delay);
-
-            // 等门将把扑救动作播完（倒地 + 起身）再复位，否则会在半途被强行拽回站位。
-            // 兜底 3 秒，避免动画状态机异常时永远不复位。
-            float waited = 0f;
-            while (waited < 3f && !IsGoalKeeperIdle())
-            {
-                yield return new WaitForSeconds(0.1f);
-                waited += 0.1f;
-            }
+            yield return _ball.WaitForReplayToSettle(
+                () => _goalKeeper.IsReplayPoseReady && ShotPlaybackGate.IsShooterReady);
 
             _resetCoroutine = null;
             ResetNow();
             if (_trajectoryUi != null)
                 _trajectoryUi.SetStatus("已回到轨迹起点，可以再次播放。 ");
-        }
-
-        /// <summary>门将是否已经播完动作、回到待机站立</summary>
-        bool IsGoalKeeperIdle()
-        {
-            if (_goalKeeper == null || _goalKeeper.Animator == null)
-                return true;
-
-            return _goalKeeper.Animator.GetCurrentAnimatorStateInfo(0).IsName("Idle");
         }
 
         void ResetNow()
@@ -475,6 +450,7 @@ namespace Assets.SuperGoalie.Scripts.Managers
             // 自动复位同样要把射手带回助跑起点，否则只有手动「停止」才会复位射手
             ShotPlaybackGate.ResetAll();
             ResetGoalKeeper();
+            _goal.GoalTrigger.ResetForNewShot();
             _goal.GoalTrigger.gameObject.SetActive(true);
 
             if (_trajectoryUi != null)
@@ -483,12 +459,7 @@ namespace Assets.SuperGoalie.Scripts.Managers
 
         void ResetGoalKeeper()
         {
-            if (_goalKeeper != null)
-            {
-                _goalKeeper.ResetPosition();
-                if (_goalKeeper.FSM != null && _goalKeeper.FSM.ContainsState<IdleMainState>())
-                    _goalKeeper.FSM.ChangeState<IdleMainState>();
-            }
+            if (_goalKeeper != null) _goalKeeper.ResetReplayPose();
         }
 
         void ValidatePenaltyStart(BallTrajectory trajectory)

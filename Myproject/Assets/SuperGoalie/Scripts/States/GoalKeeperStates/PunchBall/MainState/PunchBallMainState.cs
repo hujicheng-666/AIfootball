@@ -21,6 +21,8 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
             base.Enter();
 
             _time = 0f;
+            if (Owner.Ball.TrajectoryPlayer != null && Owner.Ball.TrajectoryPlayer.ActiveTrajectory != null)
+                Owner.FinishReplayAttempt();
 
             _leftHandTargetPosition = Machine.GetState<InterceptShotMainState>().LeftHandTargetPosition;
             _rightHandTargetPosition = Machine.GetState<InterceptShotMainState>().RightHandTargetPosition;
@@ -46,8 +48,11 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
             base.Execute();
 
             //go to idle state the moment the player gets into idle state
-            if (Owner.Animator.GetCurrentAnimatorStateInfo(0).IsName("Idle"))
+            if (Owner.IsReplayPoseReady)
+            {
+                Owner.SetDiveLift(0f);
                 Machine.ChangeState<IdleMainState>();
+            }
         }
 
         public override void OnAnimatorIK(int layerIndex)
@@ -118,7 +123,7 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
             base.OnAnimatorMove();
 
             //manipulate the player height
-            Owner.ModelRoot.transform.localPosition = Vector3.zero;
+            Owner.SetDiveLift(Mathf.MoveTowards(Owner.DiveLift, 0f, Time.deltaTime * 4f));
         }
 
         float GetWorldBallRadius()

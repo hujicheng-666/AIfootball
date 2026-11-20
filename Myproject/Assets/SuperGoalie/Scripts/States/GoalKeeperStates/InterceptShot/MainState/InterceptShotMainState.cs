@@ -251,8 +251,7 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
             float positionY = Mathf.Lerp(0f, RequiredJumpHeight, ratio);
 
             //now move the player character depending on the height
-            Vector3 localPosition = new Vector3(Owner.ModelRoot.transform.localPosition.x, positionY, Owner.ModelRoot.transform.localPosition.z);
-            Owner.ModelRoot.transform.localPosition = localPosition;
+            Owner.SetDiveLift(positionY);
         }
 
         public Transform GetBone(HumanBodyBones bone)

@@ -50,6 +50,7 @@ namespace PenaltyKickPlatform.Shooter
             ShotPlaybackGate.Interceptor = Intercept;
             ShotPlaybackGate.Canceller = CancelPending;
             ShotPlaybackGate.ResetHandler = ResetShooter;
+            ShotPlaybackGate.ShooterIsAnimating = IsShooterAnimating;
         }
 
         private void OnDisable()
@@ -58,10 +59,14 @@ namespace PenaltyKickPlatform.Shooter
             ShotPlaybackGate.Release(Intercept);
             ShotPlaybackGate.ReleaseCanceller(CancelPending);
             ShotPlaybackGate.ReleaseResetHandler(ResetShooter);
+            if (ShotPlaybackGate.ShooterIsAnimating == IsShooterAnimating)
+                ShotPlaybackGate.ShooterIsAnimating = null;
 
             // 被禁用时若仍在等待触球，必须放行，否则球永远不会飞出
             ReleasePending("绑定器被禁用");
         }
+
+        private bool IsShooterAnimating() => _shooter != null && _shooter.IsPlaying;
 
         /// <summary>把射手恢复到待机站立。由项目里的「复位」触发。</summary>
         public void ResetShooter()

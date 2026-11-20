@@ -38,6 +38,9 @@ namespace Assets.SuperGoalie.Scripts.Managers
         /// （例如用户点了项目里的「复位」）。
         /// </summary>
         public static Action ResetHandler;
+        public static Func<bool> ShooterIsAnimating;
+
+        public static bool IsShooterReady => ShooterIsAnimating == null || !ShooterIsAnimating();
 
         public static bool HasInterceptor { get { return Interceptor != null; } }
 

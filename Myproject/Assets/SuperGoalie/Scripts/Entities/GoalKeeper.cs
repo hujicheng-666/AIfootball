@@ -2,6 +2,7 @@ using Assets.SimpleSteering.Scripts.Movement;
 using Assets.SuperGoalie.Scripts.Data;
 using Assets.SuperGoalie.Scripts.FSMs;
 using Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState;
+using Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Idle.MainState;
 using Assets.SuperGoalie.Scripts.States.GoalKeeperStates.TendGoal.MainState;
 using System;
 using UnityEngine;
@@ -146,6 +147,20 @@ namespace Assets.SuperGoalie.Scripts.Entities
         /// <summary>守门员初始位置（球门正中，球门线上）</summary>
         Vector3 _homePosition;
         Quaternion _homeRotation;
+        Vector3 _modelHomeLocalPosition;
+        static readonly int IdleState = UnityEngine.Animator.StringToHash("Base Layer.Idle");
+
+        public bool WaitingForReplayReset { get; private set; }
+        public bool IsReplayPoseReady => _animator == null ||
+            (!_animator.IsInTransition(0) && _animator.GetCurrentAnimatorStateInfo(0).fullPathHash == IdleState);
+
+        public float DiveLift => _modelRoot == null ? 0f : _modelRoot.transform.localPosition.y - _modelHomeLocalPosition.y;
+
+        public void SetDiveLift(float height)
+        {
+            if (_modelRoot != null)
+                _modelRoot.transform.localPosition = _modelHomeLocalPosition + Vector3.up * height;
+        }
 
         struct BoneCapsule
         {
@@ -196,6 +211,7 @@ namespace Assets.SuperGoalie.Scripts.Entities
 
             // 从 ScriptableObject 加载门将数据
             _homeRotation = transform.rotation;
+            if (_modelRoot != null) _modelHomeLocalPosition = _modelRoot.transform.localPosition;
 
             if (_goalkeeperData != null)
                 _goalkeeperData.ApplyTo(this);
@@ -234,7 +250,22 @@ namespace Assets.SuperGoalie.Scripts.Entities
         {
             transform.SetPositionAndRotation(_homePosition, _homeRotation);
             if (RPGMovement != null)
+            {
                 RPGMovement.SetSteeringOff();
+                RPGMovement.SetTrackingOff();
+                RPGMovement.CurrentSpeed = 0f;
+                var body = RPGMovement.RigidBody;
+                if (body != null)
+                {
+                    body.position = _homePosition;
+                    body.rotation = _homeRotation;
+                    if (!body.isKinematic)
+                    {
+                        body.velocity = Vector3.zero;
+                        body.angularVelocity = Vector3.zero;
+                    }
+                }
+            }
         }
 
         /// <summary>设置初始位置和朝向</summary>
@@ -248,13 +279,43 @@ namespace Assets.SuperGoalie.Scripts.Entities
         /// <summary>重置到初始位置</summary>
         public void ResetToHome()
         {
-            transform.SetPositionAndRotation(_homePosition, _homeRotation);
-            if (RPGMovement != null)
-                RPGMovement.SetSteeringOff();
+            ResetPosition();
+        }
+
+        public void FinishReplayAttempt()
+        {
+            WaitingForReplayReset = true;
+            if (FSM != null && FSM.IsCurrentState<TendGoalMainState>())
+                FSM.ChangeState<IdleMainState>();
+        }
+
+        public void ResetReplayPose()
+        {
+            WaitingForReplayReset = true;
+            SaveAttemptSuccess = false;
+            WasHitByBall = false;
+            SaveProbability = 0f;
+            if (FSM != null && FSM.ContainsState<IdleMainState>())
+                FSM.ChangeState<IdleMainState>();
+
+            if (_animator != null && _animator.HasState(0, IdleState))
+            {
+                _animator.ResetTrigger("Dive");
+                _animator.ResetTrigger("Exit");
+                _animator.ResetTrigger("TendGoal");
+                _animator.ResetTrigger("Idle");
+                _animator.SetFloat("Forward", 0f);
+                _animator.SetFloat("Turn", 0f);
+                _animator.Play(IdleState, 0, 0f);
+                _animator.Update(0f);
+            }
+            SetDiveLift(0f);
+            ResetPosition();
         }
 
         public void PrepareForShot()
         {
+            WaitingForReplayReset = false;
             if (FSM != null && FSM.ContainsState<TendGoalMainState>())
                 FSM.ChangeState<TendGoalMainState>();
         }

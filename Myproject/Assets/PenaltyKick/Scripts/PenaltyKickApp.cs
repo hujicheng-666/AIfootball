@@ -184,8 +184,7 @@ namespace PenaltyKickPlatform
             }
 
             _currentGoalkeeperName = Path.GetFileNameWithoutExtension(path);
-            _keeper.ResetToHome();
-            ResetKeeperShotState();
+            _keeper.ResetReplayPose();
             RefreshGoalkeeperUI();
             SetStatus("\u5f53\u524d\u95e8\u5c06: " + GetGoalkeeperDisplayName());
             return true;
@@ -321,19 +320,16 @@ namespace PenaltyKickPlatform
         public void ResetAll()
         {
             StopAutoReset();
-            // 丢弃尚未走到触球帧的发射，并让射手复位到待机站立
-            ShotPlaybackGate.ResetAll();
             _trajectoryPlaying = false;
             _goalScored = false;
             _resultRecorded = false;
             Time.timeScale = 1f;
-            _ball.CancelTrajectory();
-            _ball.Stop();
-            // 使用实际球半径而非硬编码 0.145f，保证复位高度与轨迹/校验逻辑一致
-            _ball.transform.SetPositionAndRotation(_coordinates.ToWorld(new Vector3(11f, 0f, _ball.WorldRadius)), _ballInitialRotation);
             _ball.gameObject.SetActive(true);
-            _keeper.ResetToHome();
-            ResetKeeperShotState();
+            _ball.Rotation = _ballInitialRotation;
+            _ball.HoldAtCenter(_trajectory != null ? _trajectory.InitialCenter
+                : _coordinates.ToWorld(new Vector3(11f, 0f, _ball.WorldRadius)));
+            ShotPlaybackGate.ResetAll();
+            _keeper.ResetReplayPose();
             _goal.GoalTrigger.ResetForNewShot();
             _goal.GoalTrigger.gameObject.SetActive(true);
             _ui.SetLiveTime(0f, _trajectory?.Duration ?? 0f);
@@ -360,11 +356,12 @@ namespace PenaltyKickPlatform
             _trajectoryName = displayName;
 
             _ball.gameObject.SetActive(true);
+            _ball.Rotation = _ballInitialRotation;
             _ball.HoldAtCenter(trajectory.InitialCenter);
+            ShotPlaybackGate.ResetAll();
             _goal.GoalTrigger.ResetForNewShot();
             _goal.GoalTrigger.gameObject.SetActive(true);
-            _keeper.ResetToHome();
-            ResetKeeperShotState();
+            _keeper.ResetReplayPose();
             _ui.SetLiveTime(0f, trajectory.Duration);
 
             float maxHeight = trajectory.MaxCenterY - _coordinates.Origin.y;
@@ -387,12 +384,13 @@ namespace PenaltyKickPlatform
             _currentHistoryId = historyId;
             Time.timeScale = _playbackSpeed;
 
-            _ball.Stop();
             _ball.gameObject.SetActive(true);
+            _ball.Rotation = _ballInitialRotation;
+            _ball.HoldAtCenter(trajectory.InitialCenter);
+            ShotPlaybackGate.ResetAll();
             _goal.GoalTrigger.ResetForNewShot();
             _goal.GoalTrigger.gameObject.SetActive(true);
-            _keeper.ResetToHome();
-            ResetKeeperShotState();
+            _keeper.ResetReplayPose();
             _keeper.PrepareForShot();
 
             _trajectory = trajectory;
@@ -411,15 +409,6 @@ namespace PenaltyKickPlatform
         }
 
 
-        private void ResetKeeperShotState()
-        {
-            if (_keeper == null)
-                return;
-
-            _keeper.SaveAttemptSuccess = false;
-            _keeper.WasHitByBall = false;
-            _keeper.SaveProbability = 0f;
-        }
         private void HandleGoalScored()
         {
             if (_resultRecorded || (!_trajectoryPlaying && _autoResetCoroutine == null)) return;
@@ -434,7 +423,7 @@ namespace PenaltyKickPlatform
             _ui.RebuildHistory();
             _resultRecorded = true;
             SetStatus("\u8fdb\u7403\uff0c\u7403\u7ee7\u7eed\u6309\u7269\u7406\u8fd0\u52a8\u3002");
-            ScheduleAutoResetWhenBallSettles(8f, "\u5df2\u81ea\u52a8\u590d\u4f4d\u3002");
+            ScheduleAutoResetWhenBallSettles();
         }
 
 
@@ -444,7 +433,7 @@ namespace PenaltyKickPlatform
                 return;
 
             _trajectoryPlaying = false;
-            ScheduleAutoResetWhenBallSettles(8f, "\u5df2\u81ea\u52a8\u590d\u4f4d\u3002");
+            ScheduleAutoResetWhenBallSettles();
         }
 
         private void HandleTrajectoryReleased()
@@ -453,7 +442,7 @@ namespace PenaltyKickPlatform
                 return;
 
             _trajectoryPlaying = false;
-            ScheduleAutoResetWhenBallSettles(8f, "\u5df2\u81ea\u52a8\u590d\u4f4d\u3002");
+            ScheduleAutoResetWhenBallSettles();
         }
 
         private void RecordNonGoalResult()
@@ -466,48 +455,22 @@ namespace PenaltyKickPlatform
             SetStatus(result + "\uff0c\u5373\u5c06\u81ea\u52a8\u590d\u4f4d\u3002");
         }
 
-        private void ScheduleAutoReset(float delaySeconds, string statusAfterReset)
+        private void ScheduleAutoResetWhenBallSettles()
         {
-            StopAutoReset();
-            _autoResetCoroutine = StartCoroutine(AutoResetAfterDelay(delaySeconds, statusAfterReset));
+            if (_autoResetCoroutine != null) return;
+            _keeper.FinishReplayAttempt();
+            _autoResetCoroutine = StartCoroutine(AutoResetWhenBallSettles());
         }
 
-        private void ScheduleAutoResetWhenBallSettles(float maxDelaySeconds, string statusAfterReset)
+        private IEnumerator AutoResetWhenBallSettles()
         {
-            StopAutoReset();
-            _autoResetCoroutine = StartCoroutine(AutoResetWhenBallSettles(maxDelaySeconds, statusAfterReset));
-        }
-
-        private IEnumerator AutoResetWhenBallSettles(float maxDelaySeconds, string statusAfterReset)
-        {
-            float elapsed = 0f;
-            float settled = 0f;
-            while (elapsed < maxDelaySeconds)
-            {
-                yield return new WaitForSecondsRealtime(0.25f);
-                elapsed += 0.25f;
-                bool physicsBall = _ball != null && (_ball.TrajectoryPlayer == null || !_ball.TrajectoryPlayer.IsPlaying);
-                bool slow = _ball == null || _ball.Rigidbody == null || _ball.Rigidbody.velocity.sqrMagnitude < 0.04f;
-                settled = physicsBall && slow ? settled + 0.25f : 0f;
-                if (elapsed >= 1.5f && settled >= 0.75f)
-                    break;
-            }
-
+            yield return _ball.WaitForReplayToSettle(
+                () => _keeper.IsReplayPoseReady && ShotPlaybackGate.IsShooterReady);
             _autoResetCoroutine = null;
             if (!_resultRecorded && !_goalScored)
                 RecordNonGoalResult();
             ResetAll();
-            SetStatus(statusAfterReset);
-        }
-
-        private IEnumerator AutoResetAfterDelay(float delaySeconds, string statusAfterReset)
-        {
-            yield return new WaitForSecondsRealtime(delaySeconds);
-            _autoResetCoroutine = null;
-            if (!_resultRecorded && !_goalScored)
-                RecordNonGoalResult();
-            ResetAll();
-            SetStatus(statusAfterReset);
+            SetStatus("已自动复位，可以再次播放。");
         }
 
         private void StopAutoReset()

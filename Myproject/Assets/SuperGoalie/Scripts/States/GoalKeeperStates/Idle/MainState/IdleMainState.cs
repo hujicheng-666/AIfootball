@@ -31,7 +31,7 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Idle.MainState
             base.Execute();
 
             //if the ball is within threatening distance then tend goal
-            if (Owner.IsBallWithThreateningDistance())
+            if (!Owner.WaitingForReplayReset && Owner.IsBallWithThreateningDistance())
                 Machine.ChangeState<TendGoalMainState>();
         }
 

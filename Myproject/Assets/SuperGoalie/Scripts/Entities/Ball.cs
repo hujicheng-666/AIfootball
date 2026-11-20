@@ -1,5 +1,6 @@
 using Assets.SuperGoalie.Scripts.Trajectories;
 using System;
+using System.Collections;
 using UnityEngine;
 
 namespace Assets.SuperGoalie.Scripts.Entities
@@ -144,6 +145,29 @@ namespace Assets.SuperGoalie.Scripts.Entities
         public void HoldAtCenter(Vector3 worldCenter)
         {
             TrajectoryPlayer.HoldAtCenter(worldCenter);
+        }
+
+        public IEnumerator WaitForReplayToSettle(Func<bool> actorsReady)
+        {
+            const float minimumTail = 0.75f;
+            const float requiredStillTime = 0.35f;
+            const float maximumTail = 4f;
+            float elapsed = 0f;
+            float stillTime = 0f;
+            while (elapsed < maximumTail)
+            {
+                yield return null;
+                float dt = Time.unscaledDeltaTime;
+                // A goal can be reported before the last CSV frame. Wait for the
+                // recorded motion to finish before starting the physical tail.
+                if (TrajectoryPlayer.IsPlaying) continue;
+
+                elapsed += dt;
+                bool slow = Rigidbody.IsSleeping() || Rigidbody.velocity.sqrMagnitude < 0.04f;
+                stillTime = slow ? stillTime + dt : 0f;
+                if (elapsed >= minimumTail && stillTime >= requiredStillTime && actorsReady())
+                    yield break;
+            }
         }
 
         public void CancelTrajectory()

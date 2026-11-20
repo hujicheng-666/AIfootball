@@ -51,7 +51,10 @@ namespace Assets.SuperGoalie.Scripts.Trajectories
             _currentVelocity = Vector3.zero;
 
             PrepareKinematicBody();
-            _ball.Rigidbody.position = _ball.RootPositionForCenter(worldCenter);
+            Vector3 position = _ball.RootPositionForCenter(worldCenter);
+            _ball.Rigidbody.position = position;
+            // At reset the other actors can read the ball in this same frame.
+            _ball.transform.position = position;
         }
 
         public void Play(BallTrajectory trajectory)
