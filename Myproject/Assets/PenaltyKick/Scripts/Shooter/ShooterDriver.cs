@@ -439,15 +439,20 @@ namespace PenaltyKickPlatform.Shooter
             return true;
         }
 
-        /// <summary>中止并回到待机：位置复位到踢球站位，姿态回到自然站立。</summary>
+        /// <summary>
+        /// 中止并回到待机：位置复位到**助跑起点**（不是踢球站位），姿态回到自然站立。
+        /// 回到起点而非站位，是为了让待机位置与下一次 Play() 的起始位置一致，
+        /// 避免开播瞬间从球边瞬移到身后。
+        /// </summary>
         public void StopAndReset()
         {
             _phase = ShooterPhase.Idle;
             _phaseTime = 0f;
             _kickFired = false;
-            ComputeStandPositions();
-            transform.position = _strikePosition;
+            // 与 Play() 保持同一顺序：先定朝向再算站位，否则两处结果不一致
             KeepFacingTarget();
+            ComputeStandPositions();
+            transform.position = _startPosition;
             if (_animClip != null)
             {
                 ApplyPoseAt(0f);       // 停在首帧（准备姿势）
@@ -462,14 +467,16 @@ namespace PenaltyKickPlatform.Shooter
 
         private void ComputeStandPositions()
         {
+            Vector3 anchor = _ball != null ? _ball.position : transform.position;
+
+            // 以球心为参考而不是射手当前位置：位置与朝向互为输入时，
+            // 每次复位都会基于上一次的结果重算，导致站位反复迭代漂移。
             Vector3 forward = Vector3.forward;
             if (_facingTarget != null)
             {
-                Vector3 flat = Vector3.ProjectOnPlane(_facingTarget.position - transform.position, Vector3.up);
+                Vector3 flat = Vector3.ProjectOnPlane(_facingTarget.position - anchor, Vector3.up);
                 if (flat.sqrMagnitude > 1e-6f) forward = flat.normalized;
             }
-
-            Vector3 anchor = _ball != null ? _ball.position : transform.position;
             // 触球帧的脚要刚好落在球上：clip 模式用实测的髋-脚水平距离，
             // JSON 模式优先用片段自带的 standOffset
             float stand = _animClip != null
@@ -645,7 +652,9 @@ namespace PenaltyKickPlatform.Shooter
 
         private void KeepFacingTarget(){
             if (_facingTarget == null) return;
-            Vector3 flat = Vector3.ProjectOnPlane(_facingTarget.position - transform.position, Vector3.up);
+            // 同 ComputeStandPositions：用球心做参考，避免依赖射手当前位置
+            Vector3 anchor = _ball != null ? _ball.position : transform.position;
+            Vector3 flat = Vector3.ProjectOnPlane(_facingTarget.position - anchor, Vector3.up);
             if (flat.sqrMagnitude < 1e-6f) return;
             // 叠一个偏航角：让射手侧身对球门（正对看起来像站军姿，也不像真实助跑）
             Quaternion look = Quaternion.LookRotation(flat.normalized, Vector3.up);

@@ -68,7 +68,7 @@ namespace PenaltyKickPlatform.Shooter
         {
             CancelPending();
             if (_shooter != null) _shooter.StopAndReset();
-            if (_logEvents) Debug.Log("[ShooterPlaybackBinder] 射手已复位到待机站立。", this);
+            if (_logEvents) Debug.Log("[ShooterPlaybackBinder] 射手已复位到助跑起点。", this);
         }
 
         private static ShooterDriver FindShooter()
