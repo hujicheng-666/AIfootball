@@ -16,36 +16,15 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
         Vector3 _leftHandTargetPosition;
         Vector3 _rightHandTargetPosition;
 
-        // ── 收尾阶段 ──────────────────────────────────────────────────────
-        // 扑救动作全长 2.5–3.5 s，碰到球只占前 18%–30%，后面的倒地与起身才是
-        // 「看着像扑救」的关键。这里按动作剩余时长走完，不再让球一到点就掐断。
-        float _elapsed;
-        float _remainAnimTime;
-        float _finishSpeed = 1.6f;
-        float _startY;
-
         public override void Enter()
         {
             base.Enter();
 
             _time = 0f;
-            _elapsed = 0f;
 
-            var intercept = Machine.GetState<InterceptShotMainState>();
-            _leftHandTargetPosition = intercept.LeftHandTargetPosition;
-            _rightHandTargetPosition = intercept.RightHandTargetPosition;
-            _turn = intercept.Turn;
-
-            var dive = intercept.DiveInfo;
-            _remainAnimTime = Mathf.Max(0.30f, (1f - dive.ContactNorm) * dive.Length);
-            _startY = Owner.ModelRoot.transform.localPosition.y;
-
-            // 收尾提速：完整倒地起身约 2.5 s，提到 1.6 倍后约 1.6 s，节奏不至于拖沓
-            Owner.Animator.ResetTrigger("Exit");
-            Owner.Animator.speed = _finishSpeed;
-
-            // 接触瞬间停止代码平移，位移完全由动作接管
-            Owner.RPGMovement.SetSteeringOff();
+            _leftHandTargetPosition = Machine.GetState<InterceptShotMainState>().LeftHandTargetPosition;
+            _rightHandTargetPosition = Machine.GetState<InterceptShotMainState>().RightHandTargetPosition;
+            _turn = Machine.GetState<InterceptShotMainState>().Turn;
 
             // Contact and deflection are owned by BallTrajectoryPlayer. This state
             // only transitions the animation after an actual swept contact.
@@ -56,40 +35,19 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
                         gm.ShowStatus(string.Format("{0}! (\u8d28\u91cf {1:0}%)", GetContactLabel(Owner.LastContactKind), Owner.SaveProbability * 100f));
                 }
 
+            Owner.Animator.SetTrigger("Exit");
             Action temp = Owner.OnPunchBall;
             if (temp != null)
                 temp.Invoke();
-
-            if (Owner.Goal != null)
-            {
-                float lateral = Vector3.Dot(Owner.Position - Owner.Goal.CsvCoordinateOrigin, Owner.Goal.PitchRight);
-                Debug.Log(string.Format("[GKContact] lateral={0:F2}m modelY={1:F2} remain={2:F2}s",
-                    lateral, Owner.ModelRoot.localPosition.y, _remainAnimTime));
-            }
         }
 
         public override void Execute()
         {
             base.Execute();
 
-            // 等倒地与起身播完，再切回待机
-            _elapsed += Time.deltaTime;
-            if (_elapsed * _finishSpeed >= _remainAnimTime - 0.05f)
-            {
-                ExitDive();
-                return;
-            }
-
-            // 兜底：若动画已经被别处切回 Idle，直接同步 FSM
+            //go to idle state the moment the player gets into idle state
             if (Owner.Animator.GetCurrentAnimatorStateInfo(0).IsName("Idle"))
                 Machine.ChangeState<IdleMainState>();
-        }
-
-        void ExitDive()
-        {
-            Owner.Animator.speed = 1f;
-            Owner.Animator.SetTrigger("Exit");
-            Machine.ChangeState<IdleMainState>();
         }
 
         public override void OnAnimatorIK(int layerIndex)
@@ -159,12 +117,8 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.Dive.MainState
         {
             base.OnAnimatorMove();
 
-            // 倒地与起身的高度变化同样来自 root motion。
-            // 之前这里把高度强行压向 0，但真正的问题是 root motion 被整体丢弃，
-            // 人既不下降也不横移——现在交给动画自己给高度。
-            Vector3 localPosition = Owner.ModelRoot.transform.localPosition;
-            localPosition.y += Owner.Animator.deltaPosition.y;
-            Owner.ModelRoot.transform.localPosition = localPosition;
+            //manipulate the player height
+            Owner.ModelRoot.transform.localPosition = Vector3.zero;
         }
 
         float GetWorldBallRadius()
