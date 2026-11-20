@@ -127,7 +127,12 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
             _height = Mathf.Clamp01(ballAtGoalLocal.y / Mathf.Max(0.1f, goalHeight));
             Owner.Animator.SetFloat("Height", _height);
             Owner.Animator.SetFloat("Turn", _turn);
-            Owner.Animator.SetTrigger("Dive");
+
+            // 9 格直选：每格是一条独立动作（低/中/高 × 左/中/右），不做 2D 插值。
+            // 这些动作来源不同、时长不同，混合会互相污染，因此按落点最近格直接 CrossFade。
+            string diveState = SelectDiveState(_turn, _height);
+            Owner.Animator.CrossFade(diveState, 0.10f, 0);
+            Debug.Log($"[GKDecision] goalLocal={ballAtGoalLocal} goalHeight={goalHeight:F2} => Height={_height:F2} Turn={_turn:F2} lateralDelta={lateralDelta:F2} reach={_effectiveReach:F2} state={diveState}");
 
             LeftHandTargetPosition = GetBoneIKTarget(HumanBodyBones.LeftHand);
             RightHandTargetPosition = GetBoneIKTarget(HumanBodyBones.RightHand);
@@ -288,6 +293,17 @@ namespace Assets.SuperGoalie.Scripts.States.GoalKeeperStates.InterceptShot.MainS
 
             //return the ik target
             return ballIKTarget;
+        }
+
+        /// <summary>
+        /// 9 格直选：把落点归到最近的格子，返回对应的动画状态名。
+        /// 高度分档：&lt;0.25 低（贴地球），0.25–0.60 中（胸腹），&gt;0.60 高（头以上）。
+        /// </summary>
+        string SelectDiveState(float turn, float height)
+        {
+            string side = turn < -0.01f ? "Left" : (turn > 0.01f ? "Right" : "Center");
+            string band = height < 0.25f ? "Low" : (height < 0.60f ? "Mid" : "High");
+            return "Punch_" + band + "_" + side;
         }
 
         GoalKeeper Owner

@@ -54,6 +54,10 @@ namespace Assets.SuperGoalie.Scripts.Managers
         {
             base.Awake();
 
+            // 以 --wpf-host 嵌入 WPF 时，Unity 窗口常常没有焦点；
+            // 默认 runInBackground=false 会让主循环停摆，命令桥接与物理都不再推进。
+            Application.runInBackground = true;
+
             ResolveSceneReferences();
             List<string> missingReferences = GetMissingSceneReferences();
             if (missingReferences.Count > 0)
